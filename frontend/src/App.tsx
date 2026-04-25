@@ -3,11 +3,11 @@ import {
   Activity, Sparkles, Target, Zap, CheckCircle2, Cpu, BarChart3,
   Layout, Layers, Globe, Search, ArrowRight, Clock, BarChart2,
   Users, Settings, ChevronRight, Volume2, Square, Plus, Radio,
-  TrendingUp, FileText, Download,
+  TrendingUp, Download, Moon, Sun,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 
-const TOTAL_INTERVIEWS = 5; // matches the 5 hardcoded archetypes in customer_validation_agent.py
+const TOTAL_INTERVIEWS = 7; // minimum interviews shown; update to match backend archetype count
 
 const AGENTS = [
   { id: 'refine',      label: 'Idea Refinement',    icon: Sparkles,  endpoint: '/refine' },
@@ -147,6 +147,8 @@ export default function App() {
   const [tokens, setTokens]           = useState<Record<string, number>>({});
   const [searches, setSearches]       = useState<Record<string, any[]>>({});
   const [activeTab, setActiveTab]     = useState('overview');
+  const [darkMode, setDarkMode] = useState(() => window.matchMedia('(prefers-color-scheme: dark)').matches);
+  const [agentTimestamps, setAgentTimestamps] = useState<Record<string, { start: number; end?: number }>>({});
   const [isOrchestrating, setIsOrchestrating] = useState(false);
   const [interviews, setInterviews]   = useState<any[]>([]);
   const [selectedInterviewIndex, setSelectedInterviewIndex] = useState<number | null>(null);
@@ -162,6 +164,10 @@ export default function App() {
   const totalTokens   = Object.values(tokens).reduce((a, v) => a + v, 0);
   const totalSearches = Object.values(searches).reduce((a, v) => a + (v?.length || 0), 0);
   const hasResults    = Object.keys(results).length > 0;
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', darkMode ? 'dark' : 'light');
+  }, [darkMode]);
 
   useEffect(() => { fetchSessions(); }, []);
 
@@ -206,6 +212,7 @@ export default function App() {
   // ── Streaming ────────────────────────────────────────────────────────────
   const streamAgent = async (agentId: string, payload: any): Promise<string> => {
     setStatus(p => ({ ...p, [agentId]: 'running' }));
+    setAgentTimestamps(p => ({ ...p, [agentId]: { start: Date.now() } }));
     setActiveTab(agentId);
     setResults(p => ({ ...p, [agentId]: '' }));
     try {
@@ -236,6 +243,7 @@ export default function App() {
         }
       }
       setStatus(p => p[agentId] === 'error' ? p : { ...p, [agentId]: 'completed' });
+      setAgentTimestamps(p => ({ ...p, [agentId]: { ...p[agentId], end: Date.now() } }));
       return full;
     } catch (e: any) {
       setStatus(p => ({ ...p, [agentId]: 'error' }));
@@ -305,7 +313,7 @@ export default function App() {
   const startAnalysis = async () => {
     if (isOrchestrating || !idea.trim()) return;
     setIsOrchestrating(true);
-    setResults({}); setStatus({}); setTokens({}); setSearches({});
+    setResults({}); setStatus({}); setTokens({}); setSearches({}); setAgentTimestamps({});
     setGlobalError(null);
     try {
       const refined = await streamAgent('refine', { idea });
@@ -485,6 +493,9 @@ export default function App() {
           <div className="topbar-right">
             <div className="stat-chip"><Cpu size={13} /> {totalTokens.toLocaleString()} tokens</div>
             <div className="stat-chip"><Search size={13} /> {totalSearches} searches</div>
+            <button className="theme-toggle" onClick={() => setDarkMode(d => !d)} title={darkMode ? 'Light mode' : 'Dark mode'}>
+              {darkMode ? <Sun size={15} /> : <Moon size={15} />}
+            </button>
             <button className="btn-new" onClick={() => { setIdea(''); setResults({}); setStatus({}); setCurrentSessionId(null); }}>
               <Plus size={14} /> New Analysis
             </button>
@@ -519,50 +530,55 @@ export default function App() {
           {activeTab === 'overview' && (
             <div className="fade-in" style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
 
-              {/* Row 1: agent status + stats donut */}
+              {/* Row 1: Research Timeline + Customer Interviews + Pipeline Stats */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 300px', gap: 18 }}>
 
-                {/* Today's Tasks — agent status */}
+                {/* Research Timeline */}
                 <div className="card">
                   <div className="card-header">
                     <div className="card-title">
                       <div className="card-title-icon" style={{ background: 'rgba(108,99,255,0.10)' }}>
-                        <FileText size={14} color="var(--primary)" />
+                        <Activity size={14} color="var(--primary)" />
                       </div>
-                      Agent Status
+                      Research Timeline
                     </div>
-                    <button className="see-all" onClick={() => setActiveTab(AGENTS.find(a => status[a.id] === 'completed')?.id || 'refine')}>
-                      See All
-                    </button>
                   </div>
-                  <div className="task-list">
-                    {AGENTS.slice(0, 4).map(agent => {
+                  <div className="timeline-track">
+                    {AGENTS.map((agent, idx) => {
                       const s = status[agent.id] || 'pending';
+                      const ts = agentTimestamps[agent.id];
+                      const duration = ts?.start && ts?.end ? ((ts.end - ts.start) / 1000).toFixed(0) : null;
+                      const startTime = ts?.start ? new Date(ts.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : null;
                       const Icon = agent.icon;
+                      const isLast = idx === AGENTS.length - 1;
                       return (
-                        <div
-                          key={agent.id}
-                          className={`task-item${activeTab === agent.id ? ' active-task' : ''}`}
-                          onClick={() => (s === 'completed' || s === 'running') && setActiveTab(agent.id)}
-                          style={{ cursor: s === 'completed' || s === 'running' ? 'pointer' : 'default' }}
-                        >
-                          <div className="task-icon"><Icon size={14} /></div>
-                          <div style={{ flex: 1, minWidth: 0 }}>
-                            <div className="task-name">{agent.label}</div>
-                            <div className="task-desc">
-                              {s === 'running' ? 'Streaming…' : s === 'completed' ? `${tokens[agent.id]?.toLocaleString() || 0} tokens` : 'Not started'}
+                        <div key={agent.id} className="timeline-item">
+                          <div className="timeline-left">
+                            <div className={`timeline-node ${s}`}>
+                              {s === 'completed' ? <CheckCircle2 size={12} /> : s === 'running' ? <div className="spinner" style={{ width: 10, height: 10 }} /> : <Icon size={11} />}
+                            </div>
+                            {!isLast && <div className={`timeline-line ${s === 'pending' ? '' : 'active'}`} />}
+                          </div>
+                          <div
+                            className={`timeline-content${s === 'completed' ? ' clickable' : ''}`}
+                            onClick={() => s === 'completed' && setActiveTab(agent.id)}
+                          >
+                            <div className="timeline-name">{agent.label}</div>
+                            <div className="timeline-meta">
+                              {startTime && <span>{startTime}</span>}
+                              {duration && <span>{duration}s</span>}
+                              {tokens[agent.id] ? <span>{tokens[agent.id].toLocaleString()} tokens</span> : null}
+                              {searches[agent.id]?.length ? <span>{searches[agent.id].length} searches</span> : null}
+                              {s === 'pending' && <span style={{ color: 'var(--text-muted)' }}>Pending</span>}
                             </div>
                           </div>
-                          <span className={`task-status-badge ${s}`}>
-                            {s === 'running' ? 'Running' : s === 'completed' ? 'Done' : s === 'error' ? 'Error' : 'Pending'}
-                          </span>
                         </div>
                       );
                     })}
                   </div>
                 </div>
 
-                {/* Today's Meetings — interview status */}
+                {/* Customer Interviews */}
                 <div className="card">
                   <div className="card-header">
                     <div className="card-title">
@@ -590,7 +606,7 @@ export default function App() {
                     </div>
                   ) : (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                      {interviews.slice(0, 3).map((int, idx) => (
+                      {interviews.slice(0, TOTAL_INTERVIEWS).map((int, idx) => (
                         <div
                           key={idx}
                           className="meeting-card"
@@ -606,17 +622,27 @@ export default function App() {
                           </div>
                         </div>
                       ))}
-                      {interviews.length > 3 && (
+                      {/* Skeleton placeholders up to 5 while streaming */}
+                      {isSimulating && Array.from({ length: Math.max(0, TOTAL_INTERVIEWS - interviews.length) }).map((_, i) => (
+                        <div key={`sk-${i}`} className="meeting-card" style={{ pointerEvents: 'none' }}>
+                          <div className="skeleton-line" style={{ width: '60%', height: 11, borderRadius: 4 }} />
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6 }}>
+                            <div className="skeleton-line" style={{ width: '40%', height: 9, borderRadius: 4 }} />
+                            <div className="skeleton-dot" style={{ marginLeft: 'auto' }} />
+                          </div>
+                        </div>
+                      ))}
+                      {interviews.length > TOTAL_INTERVIEWS && (
                         <button className="see-all" style={{ textAlign: 'left', padding: '4px 0' }} onClick={() => setActiveTab('interviews')}>
-                          +{interviews.length - 3} more interviews
+                          +{interviews.length - TOTAL_INTERVIEWS} more interviews
                         </button>
                       )}
                     </div>
                   )}
                 </div>
 
-                {/* Stats donut */}
-                <div className="card">
+                {/* Pipeline Stats — 3 stacked panels */}
+                <div className="card" style={{ gap: 10 }}>
                   <div className="card-header">
                     <div className="card-title">
                       <div className="card-title-icon" style={{ background: 'rgba(245,158,11,0.10)' }}>
@@ -625,71 +651,102 @@ export default function App() {
                       Pipeline Stats
                     </div>
                   </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 16, alignItems: 'center' }}>
-                    <DonutChart value={completedCount} max={AGENTS.length} label="done" />
-                    <div className="stats-legend" style={{ width: '100%' }}>
-                      <div className="stats-legend-item">
-                        <div className="stats-legend-dot" style={{ background: 'var(--primary)' }} />
-                        <span>Completed</span>
-                        <span className="stats-legend-val">{completedCount} / {AGENTS.length}</span>
-                      </div>
-                      <div className="stats-legend-item">
-                        <div className="stats-legend-dot" style={{ background: 'var(--warning)' }} />
-                        <span>Tokens used</span>
-                        <span className="stats-legend-val">{totalTokens.toLocaleString()}</span>
-                      </div>
-                      <div className="stats-legend-item">
-                        <div className="stats-legend-dot" style={{ background: '#38bdf8' }} />
-                        <span>Web searches</span>
-                        <span className="stats-legend-val">{totalSearches}</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
 
-              {/* Row 2: pipeline progress cards */}
-              <div className="card">
-                <div className="card-header">
-                  <div className="card-title">
-                    <div className="card-title-icon" style={{ background: 'rgba(108,99,255,0.10)' }}>
-                      <Activity size={14} color="var(--primary)" />
+                  {/* Panel 1 — Completed agents */}
+                  <div className="stat-panel">
+                    <div className="stat-panel-label">
+                      <CheckCircle2 size={12} color="var(--success)" /> Agents Completed
                     </div>
-                    Pipeline Progress
-                  </div>
-                </div>
-                <div className="event-cards">
-                  {AGENTS.map(agent => {
-                    const s = status[agent.id] || 'pending';
-                    const Icon = agent.icon;
-                    const pct = s === 'completed' ? 100 : s === 'running' ? 60 : 0;
-                    return (
+                    <div className="stat-panel-value">{completedCount}<span>/ {AGENTS.length}</span></div>
+                    <div className="progress-bar" style={{ marginTop: 8 }}>
                       <div
-                        key={agent.id}
-                        className="event-card"
-                        style={{ cursor: s === 'completed' ? 'pointer' : 'default', borderColor: s === 'running' ? 'var(--primary-border)' : 'var(--border)' }}
-                        onClick={() => s === 'completed' && setActiveTab(agent.id)}
-                      >
-                        <div className="event-card-label" style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                          <Icon size={12} /> {s === 'running' ? 'In Progress' : s === 'completed' ? 'Complete' : 'Pending'}
+                        className="progress-fill"
+                        style={{
+                          width: `${AGENTS.length > 0 ? (completedCount / AGENTS.length) * 100 : 0}%`,
+                          background: 'linear-gradient(90deg, var(--success), #86efac)',
+                        }}
+                      />
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4, fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 500 }}>
+                      <span>{AGENTS.filter(a => status[a.id] === 'running').length} running</span>
+                      <span>{AGENTS.filter(a => status[a.id] === 'error').length} failed</span>
+                    </div>
+                  </div>
+
+                  {/* Panel 2 — Tokens used */}
+                  <div className="stat-panel">
+                    <div className="stat-panel-label">
+                      <Cpu size={12} color="var(--primary)" /> Tokens Used
+                    </div>
+                    <div className="stat-panel-value">
+                      {totalTokens > 999 ? `${(totalTokens / 1000).toFixed(1)}k` : totalTokens}
+                    </div>
+                    <div style={{ display: 'flex', gap: 4, marginTop: 8, flexWrap: 'wrap' }}>
+                      {AGENTS.filter(a => tokens[a.id]).map(a => {
+                        const pct = totalTokens > 0 ? tokens[a.id] / totalTokens : 0;
+                        return (
+                          <div
+                            key={a.id}
+                            title={`${a.label}: ${tokens[a.id].toLocaleString()} tokens`}
+                            style={{
+                              height: 6,
+                              borderRadius: 3,
+                              background: 'var(--primary)',
+                              opacity: 0.3 + pct * 0.7,
+                              flex: `${tokens[a.id]} 0 0`,
+                              minWidth: 4,
+                              transition: 'flex 0.4s ease',
+                            }}
+                          />
+                        );
+                      })}
+                      {totalTokens === 0 && (
+                        <div style={{ height: 6, borderRadius: 3, background: 'var(--border)', flex: 1 }} />
+                      )}
+                    </div>
+                    <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 4, fontWeight: 500 }}>
+                      across {Object.keys(tokens).length} agent{Object.keys(tokens).length !== 1 ? 's' : ''}
+                    </div>
+                  </div>
+
+                  {/* Panel 3 — Web searches */}
+                  <div className="stat-panel">
+                    <div className="stat-panel-label">
+                      <Search size={12} color="#0284c7" /> Web Searches
+                    </div>
+                    <div className="stat-panel-value" style={{ color: '#0284c7' }}>{totalSearches}</div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 8 }}>
+                      {AGENTS.filter(a => searches[a.id]?.length).map(a => (
+                        <div key={a.id} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', width: 72, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: 500 }}>
+                            {a.label}
+                          </span>
+                          <div style={{ flex: 1, height: 4, background: 'var(--border)', borderRadius: 2, overflow: 'hidden' }}>
+                            <div style={{
+                              height: '100%',
+                              borderRadius: 2,
+                              background: '#38bdf8',
+                              width: `${totalSearches > 0 ? (searches[a.id].length / totalSearches) * 100 : 0}%`,
+                              transition: 'width 0.4s ease',
+                            }} />
+                          </div>
+                          <span style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', fontWeight: 600, minWidth: 14, textAlign: 'right' }}>
+                            {searches[a.id].length}
+                          </span>
                         </div>
-                        <div className="event-card-title">{agent.label}</div>
-                        {s !== 'pending' && (
-                          <>
-                            <div className="progress-bar"><div className="progress-fill" style={{ width: `${pct}%` }} /></div>
-                            <div className="progress-pct">{pct}%</div>
-                          </>
-                        )}
-                      </div>
-                    );
-                  })}
+                      ))}
+                      {totalSearches === 0 && (
+                        <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 500 }}>No searches yet</div>
+                      )}
+                    </div>
+                  </div>
                 </div>
               </div>
 
-              {/* Row 3: Status + Recent Sessions side by side */}
+              {/* Row 2: Status + Recent Sessions */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 18 }}>
 
-                {/* Status */}
+                {/* Status — live pipeline activity */}
                 <div className="card">
                   <div className="card-header">
                     <div className="card-title">
@@ -699,27 +756,49 @@ export default function App() {
                       Status
                     </div>
                   </div>
-                  <div className="alert-list">
-                    {AGENTS.filter(a => status[a.id] === 'error').map(a => (
-                      <div key={a.id} className="alert-item">
-                        <div className="alert-dot error" />
-                        <div className="alert-text"><span className="alert-link">{a.label}</span> failed. Click to retry.</div>
+                  {(() => {
+                    const errors   = AGENTS.filter(a => status[a.id] === 'error');
+                    const running  = AGENTS.filter(a => status[a.id] === 'running');
+                    const completed = AGENTS.filter(a => status[a.id] === 'completed')
+                      .sort((a, b) => (agentTimestamps[b.id]?.end || 0) - (agentTimestamps[a.id]?.end || 0));
+                    const items = [...errors, ...running, ...completed].slice(0, 3);
+
+                    if (items.length === 0) return (
+                      <div className="alert-list">
+                        <div className="alert-item">
+                          <div className="alert-dot info" />
+                          <div className="alert-text">Pipeline not started yet.</div>
+                        </div>
                       </div>
-                    ))}
-                    {AGENTS.filter(a => status[a.id] === 'running').map(a => (
-                      <div key={a.id} className="alert-item">
-                        <div className="alert-dot warning" />
-                        <div className="alert-text"><span className="alert-link">{a.label}</span> is streaming results…</div>
+                    );
+
+                    return (
+                      <div className="alert-list">
+                        {items.map(a => {
+                          const s = status[a.id];
+                          const ts = agentTimestamps[a.id];
+                          const duration = ts?.start && ts?.end ? `${((ts.end - ts.start) / 1000).toFixed(0)}s` : null;
+                          return (
+                            <div key={a.id} className="alert-item">
+                              {s === 'error'     && <div className="alert-dot error" />}
+                              {s === 'running'   && <div className="alert-dot warning" />}
+                              {s === 'completed' && <div className="alert-dot" style={{ background: 'var(--success)' }} />}
+                              <div className="alert-text">
+                                <span
+                                  className="alert-link"
+                                  style={{ cursor: s === 'completed' ? 'pointer' : 'default' }}
+                                  onClick={() => s === 'completed' && setActiveTab(a.id)}
+                                >{a.label}</span>
+                                {s === 'error'     && ' failed.'}
+                                {s === 'running'   && ' is streaming…'}
+                                {s === 'completed' && <> completed{duration ? ` in ${duration}` : ''}.</>}
+                              </div>
+                            </div>
+                          );
+                        })}
                       </div>
-                    ))}
-                    {AGENTS.filter(a => status[a.id] === 'error').length === 0 &&
-                     AGENTS.filter(a => status[a.id] === 'running').length === 0 && (
-                      <div className="alert-item">
-                        <div className="alert-dot info" />
-                        <div className="alert-text">All systems nominal. {completedCount} of {AGENTS.length} agents complete.</div>
-                      </div>
-                    )}
-                  </div>
+                    );
+                  })()}
                 </div>
 
                 {/* Recent sessions */}

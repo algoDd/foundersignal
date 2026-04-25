@@ -180,8 +180,30 @@ class CustomerValidationAgent(BaseAgent):
 
         full_research_dossier = "\n\n---\n\n".join(context_parts)
 
-        # 1. Identify archetypes (Simpler for streaming)
-        archetypes = ["Early Adopter", "Skeptical Stakeholder", "Industry Veteran", "Cost-Conscious User", "Practical Implementer"]
+        # 1. Ask the LLM to identify the most relevant archetypes for this specific product
+        archetype_prompt = f"""
+You are a customer research strategist. Based on the product dossier below, identify exactly 7 distinct customer archetypes that would be most insightful to interview.
+
+Each archetype should represent a meaningfully different perspective, motivation, or pain point relevant to this specific product — not generic archetypes.
+
+Product Dossier:
+{full_research_dossier[:3000]}
+
+Return ONLY a valid JSON array of 7 strings, each being a short archetype name (2-4 words).
+Example: ["Early Adopter", "Skeptical Enterprise Buyer", "Budget-Conscious SMB Owner", "Technical Power User", "Compliance-Driven Manager", "First-Time User", "Industry Veteran"]
+"""
+        archetype_res, _ = await self._llm.generate(archetype_prompt, temperature=0.7)
+        try:
+            clean = archetype_res.strip()
+            if "```json" in clean:
+                clean = clean.split("```json")[1].split("```")[0].strip()
+            elif "```" in clean:
+                clean = clean.split("```")[1].strip()
+            archetypes = json.loads(clean)
+            if not isinstance(archetypes, list) or len(archetypes) == 0:
+                raise ValueError("Invalid archetype list")
+        except Exception:
+            archetypes = ["Early Adopter", "Skeptical Stakeholder", "Industry Veteran", "Cost-Conscious User", "Practical Implementer", "Visionary Innovator", "Risk-Averse Buyer"]
         
         for archetype in archetypes:
             # 2. Generate a persona context
