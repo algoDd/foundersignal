@@ -14,6 +14,8 @@ dependencies = [
     "httpx>=0.27.0",
     "python-dotenv>=1.0.0",
     "python-multipart>=0.0.9",
+    "langgraph",
+    "langchain-google-genai",
 ]
 
 [project.optional-dependencies]
@@ -38,3 +40,15 @@ quote-style = "double"
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+
+[tool.uv]
+native-tls = true
+
+[[tool.uv.index]]
+name = "zalando"
+url = "https://pypi.zalando.net/repository/pypi/simple/"
+default = true
+
+[[tool.uv.index]]
+name = "pypi"
+url = "https://pypi.org/simple"
