@@ -8,7 +8,7 @@ from app.models.schemas import OptimizedQuery
 
 class QueryOptimizerAgent(BaseAgent):
     """Shortens and optimizes long search queries.
-    
+
     Tavily has a 400 character limit on search queries. This agent takes
     a long query and paraphrases it into the most impactful search terms.
     """

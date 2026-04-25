@@ -93,11 +93,12 @@ class TavilyService:
     def get_usage(self) -> dict:
         """Fetch current API usage and credits."""
         import httpx
+
         try:
             response = httpx.get(
                 "https://api.tavily.com/usage",
                 headers={"Authorization": f"Bearer {self._client.api_key}"},
-                timeout=10.0
+                timeout=10.0,
             )
             response.raise_for_status()
             return response.json()

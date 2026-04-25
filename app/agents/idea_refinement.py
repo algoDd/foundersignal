@@ -16,9 +16,11 @@ class IdeaRefinementAgent(BaseAgent):
     name = "idea_refinement"
     system_prompt = (
         "You are a seasoned product strategist and advisor. "
-        "Your job is to take a raw concept—which could be a new startup idea, an existing product, or a new feature—and refine it "
+        "Your job is to take a raw concept—which could be a new startup idea, "
+        "an existing product, or a new feature—and refine it "
         "into a clear, structured definition. Be specific, practical, and actionable. "
-        "Focus on clarity—a reader should understand the problem, solution and concept in under 30 seconds."
+        "Focus on clarity—a reader should understand the problem, solution and "
+        "concept in under 30 seconds."
     )
 
     async def run(self, *, idea_input: IdeaInput, feedback: str | None = None) -> RefinedIdea:
@@ -44,7 +46,8 @@ class IdeaRefinementAgent(BaseAgent):
             context_parts.append(f"Previous Review Feedback to Address:\n{feedback}")
 
         prompt = (
-            "Analyze the following concept (startup idea, product, or feature) and produce a refined, structured version.\n\n"
+            "Analyze the following concept (startup idea, product, or feature) and "
+            "produce a refined, structured version.\n\n"
             f"{chr(10).join(context_parts)}\n\n"
             "Produce:\n"
             "1. A clear problem statement (what pain exists today?)\n"
@@ -74,7 +77,8 @@ class IdeaRefinementAgent(BaseAgent):
             context_parts.append(f"Previous Review Feedback to Address:\n{feedback}")
 
         prompt = (
-            "Analyze the following concept (startup idea, product, or feature) and produce a refined, structured report in Markdown format.\n\n"
+            "Analyze the following concept (startup idea, product, or feature) and "
+            "produce a refined, structured report in Markdown format.\n\n"
             f"{chr(10).join(context_parts)}\n\n"
             "Produce a professional, detailed report with the following sections:\n"
             "# Refined Concept Analysis\n"

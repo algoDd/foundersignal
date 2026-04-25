@@ -41,13 +41,11 @@ quote-style = "double"
 asyncio_mode = "auto"
 testpaths = ["tests"]
 
+[tool.setuptools.packages.find]
+include = ["app*"]
+
 [tool.uv]
 native-tls = true
-
-[[tool.uv.index]]
-name = "zalando"
-url = "https://pypi.zalando.net/repository/pypi/simple/"
-default = true
 
 [[tool.uv.index]]
 name = "pypi"

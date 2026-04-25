@@ -98,7 +98,9 @@ class OrchestratorAgent:
             # ── Step 1: Idea Refinement ────────────────────────────────────
             try:
                 track(f"idea_refinement_v{iteration}", AgentStatus.RUNNING)
-                report.refined_idea = await self._idea_agent.run(idea_input=idea_input, feedback=feedback)
+                report.refined_idea = await self._idea_agent.run(
+                    idea_input=idea_input, feedback=feedback
+                )
                 track(f"idea_refinement_v{iteration}", AgentStatus.COMPLETED)
             except Exception as e:
                 track(f"idea_refinement_v{iteration}", AgentStatus.FAILED, str(e))
@@ -108,7 +110,7 @@ class OrchestratorAgent:
             refined = report.refined_idea
 
             # ── Step 2: Parallel — Market + Competitor ──────────
-            async def run_market():
+            async def run_market(refined=refined, iteration=iteration):
                 try:
                     track(f"market_research_v{iteration}", AgentStatus.RUNNING)
                     result = await self._market_agent.run(refined_idea=refined)
@@ -119,7 +121,7 @@ class OrchestratorAgent:
                     logger.error("Market research failed: %s", e)
                     return None
 
-            async def run_competitor():
+            async def run_competitor(refined=refined, iteration=iteration):
                 try:
                     track(f"competitor_research_v{iteration}", AgentStatus.RUNNING)
                     result = await self._competitor_agent.run(refined_idea=refined)
@@ -130,7 +132,7 @@ class OrchestratorAgent:
                     logger.error("Competitor research failed: %s", e)
                     return None
 
-            async def run_customer_validation():
+            async def run_customer_validation(refined=refined, iteration=iteration):
                 try:
                     track(f"customer_validation_v{iteration}", AgentStatus.RUNNING)
                     result = await self._customer_agent.run(refined_idea=refined)
@@ -176,7 +178,7 @@ class OrchestratorAgent:
                     logger.error("UI spec failed: %s", e)
 
             # ── Step 5: Parallel — AI Visibility + Validation Scoring ──────
-            async def run_visibility():
+            async def run_visibility(refined=refined, competitor=competitor, iteration=iteration):
                 try:
                     track(f"ai_visibility_v{iteration}", AgentStatus.RUNNING)
                     result = await self._visibility_agent.run(
@@ -190,7 +192,12 @@ class OrchestratorAgent:
                     logger.error("AI visibility failed: %s", e)
                     return None
 
-            async def run_scoring():
+            async def run_scoring(
+                refined=refined,
+                market=market,
+                competitor=competitor,
+                iteration=iteration,
+            ):
                 try:
                     track(f"validation_scoring_v{iteration}", AgentStatus.RUNNING)
                     result = await self._scoring_agent.run(
@@ -202,7 +209,11 @@ class OrchestratorAgent:
                     track(f"validation_scoring_v{iteration}", AgentStatus.COMPLETED)
                     return result
                 except Exception as e:
-                    track(f"validation_scoring_v{iteration}", AgentStatus.FAILED, str(e))
+                    track(
+                        f"validation_scoring_v{iteration}",
+                        AgentStatus.FAILED,
+                        str(e),
+                    )
                     logger.error("Validation scoring failed: %s", e)
                     return None
 
@@ -245,17 +256,19 @@ class OrchestratorAgent:
         report.agent_progress = list(progress.values())
         report.total_duration_seconds = round(time.monotonic() - start_time, 2)
 
-        report.total_tokens_used = sum([
-            self._idea_agent.tokens_used,
-            self._market_agent.tokens_used,
-            self._competitor_agent.tokens_used,
-            self._customer_agent.tokens_used,
-            self._ux_agent.tokens_used,
-            self._ui_agent.tokens_used,
-            self._visibility_agent.tokens_used,
-            self._scoring_agent.tokens_used,
-            self._verification_agent.tokens_used,
-        ])
+        report.total_tokens_used = sum(
+            [
+                self._idea_agent.tokens_used,
+                self._market_agent.tokens_used,
+                self._competitor_agent.tokens_used,
+                self._customer_agent.tokens_used,
+                self._ux_agent.tokens_used,
+                self._ui_agent.tokens_used,
+                self._visibility_agent.tokens_used,
+                self._scoring_agent.tokens_used,
+                self._verification_agent.tokens_used,
+            ]
+        )
 
         logger.info(
             "Pipeline complete — %.1fs, tokens: %d, score: %s",
@@ -289,16 +302,18 @@ class OrchestratorAgent:
         async def finalize_and_yield():
             report.agent_progress = list(progress.values())
             report.total_duration_seconds = round(time.monotonic() - start_time, 2)
-            report.total_tokens_used = sum([
-                self._idea_agent.tokens_used,
-                self._market_agent.tokens_used,
-                self._competitor_agent.tokens_used,
-                self._ux_agent.tokens_used,
-                self._ui_agent.tokens_used,
-                self._visibility_agent.tokens_used,
-                self._scoring_agent.tokens_used,
-                self._verification_agent.tokens_used,
-            ])
+            report.total_tokens_used = sum(
+                [
+                    self._idea_agent.tokens_used,
+                    self._market_agent.tokens_used,
+                    self._competitor_agent.tokens_used,
+                    self._ux_agent.tokens_used,
+                    self._ui_agent.tokens_used,
+                    self._visibility_agent.tokens_used,
+                    self._scoring_agent.tokens_used,
+                    self._verification_agent.tokens_used,
+                ]
+            )
             yield report.model_copy(deep=True)
 
         for iteration in range(2):
@@ -307,15 +322,20 @@ class OrchestratorAgent:
             # ── Step 1: Idea Refinement ────────────────────────────────────
             try:
                 track(f"idea_refinement_v{iteration}", AgentStatus.RUNNING)
-                async for chunk in finalize_and_yield(): yield chunk
+                async for chunk in finalize_and_yield():
+                    yield chunk
 
-                report.refined_idea = await self._idea_agent.run(idea_input=idea_input, feedback=feedback)
+                report.refined_idea = await self._idea_agent.run(
+                    idea_input=idea_input, feedback=feedback
+                )
                 track(f"idea_refinement_v{iteration}", AgentStatus.COMPLETED)
-                async for chunk in finalize_and_yield(): yield chunk
+                async for chunk in finalize_and_yield():
+                    yield chunk
             except Exception as e:
                 track(f"idea_refinement_v{iteration}", AgentStatus.FAILED, str(e))
                 logger.error("Idea refinement failed: %s", e)
-                async for chunk in finalize_and_yield(): yield chunk
+                async for chunk in finalize_and_yield():
+                    yield chunk
                 break
 
             refined = report.refined_idea
@@ -323,9 +343,10 @@ class OrchestratorAgent:
             # ── Step 2: Parallel — Market + Competitor ──────────
             track(f"market_research_v{iteration}", AgentStatus.RUNNING)
             track(f"competitor_research_v{iteration}", AgentStatus.RUNNING)
-            async for chunk in finalize_and_yield(): yield chunk
+            async for chunk in finalize_and_yield():
+                yield chunk
 
-            async def run_market():
+            async def run_market(refined=refined, iteration=iteration):
                 try:
                     result = await self._market_agent.run(refined_idea=refined)
                     track(f"market_research_v{iteration}", AgentStatus.COMPLETED)
@@ -335,7 +356,7 @@ class OrchestratorAgent:
                     logger.error("Market research failed: %s", e)
                     return None
 
-            async def run_competitor():
+            async def run_competitor(refined=refined, iteration=iteration):
                 try:
                     result = await self._competitor_agent.run(refined_idea=refined)
                     track(f"competitor_research_v{iteration}", AgentStatus.COMPLETED)
@@ -345,18 +366,18 @@ class OrchestratorAgent:
                     logger.error("Competitor research failed: %s", e)
                     return None
 
-            market, competitor = await asyncio.gather(
-                run_market(), run_competitor()
-            )
+            market, competitor = await asyncio.gather(run_market(), run_competitor())
             report.market_research = market
             report.competitor_analysis = competitor
             report.target_audience = None
-            async for chunk in finalize_and_yield(): yield chunk
+            async for chunk in finalize_and_yield():
+                yield chunk
 
             # ── Step 3: UX Flow ──────────────────
             try:
                 track(f"ux_flow_v{iteration}", AgentStatus.RUNNING)
-                async for chunk in finalize_and_yield(): yield chunk
+                async for chunk in finalize_and_yield():
+                    yield chunk
 
                 report.ux_flow = await self._ux_agent.run(
                     refined_idea=refined,
@@ -364,35 +385,41 @@ class OrchestratorAgent:
                     market_research=market,
                 )
                 track(f"ux_flow_v{iteration}", AgentStatus.COMPLETED)
-                async for chunk in finalize_and_yield(): yield chunk
+                async for chunk in finalize_and_yield():
+                    yield chunk
             except Exception as e:
                 track(f"ux_flow_v{iteration}", AgentStatus.FAILED, str(e))
                 logger.error("UX flow failed: %s", e)
-                async for chunk in finalize_and_yield(): yield chunk
+                async for chunk in finalize_and_yield():
+                    yield chunk
 
             # ── Step 4: UI Spec ────────────────────────────
             if report.ux_flow:
                 try:
                     track(f"ui_spec_v{iteration}", AgentStatus.RUNNING)
-                    async for chunk in finalize_and_yield(): yield chunk
+                    async for chunk in finalize_and_yield():
+                        yield chunk
 
                     report.ui_spec = await self._ui_agent.run(
                         refined_idea=refined,
                         ux_flow=report.ux_flow,
                     )
                     track(f"ui_spec_v{iteration}", AgentStatus.COMPLETED)
-                    async for chunk in finalize_and_yield(): yield chunk
+                    async for chunk in finalize_and_yield():
+                        yield chunk
                 except Exception as e:
                     track(f"ui_spec_v{iteration}", AgentStatus.FAILED, str(e))
                     logger.error("UI spec failed: %s", e)
-                    async for chunk in finalize_and_yield(): yield chunk
+                    async for chunk in finalize_and_yield():
+                        yield chunk
 
             # ── Step 5: Parallel — AI Visibility + Validation Scoring ──────
             track(f"ai_visibility_v{iteration}", AgentStatus.RUNNING)
             track(f"validation_scoring_v{iteration}", AgentStatus.RUNNING)
-            async for chunk in finalize_and_yield(): yield chunk
+            async for chunk in finalize_and_yield():
+                yield chunk
 
-            async def run_visibility():
+            async def run_visibility(refined=refined, competitor=competitor, iteration=iteration):
                 try:
                     result = await self._visibility_agent.run(
                         refined_idea=refined,
@@ -405,7 +432,12 @@ class OrchestratorAgent:
                     logger.error("AI visibility failed: %s", e)
                     return None
 
-            async def run_scoring():
+            async def run_scoring(
+                refined=refined,
+                market=market,
+                competitor=competitor,
+                iteration=iteration,
+            ):
                 try:
                     result = await self._scoring_agent.run(
                         refined_idea=refined,
@@ -416,35 +448,44 @@ class OrchestratorAgent:
                     track(f"validation_scoring_v{iteration}", AgentStatus.COMPLETED)
                     return result
                 except Exception as e:
-                    track(f"validation_scoring_v{iteration}", AgentStatus.FAILED, str(e))
+                    track(
+                        f"validation_scoring_v{iteration}",
+                        AgentStatus.FAILED,
+                        str(e),
+                    )
                     logger.error("Validation scoring failed: %s", e)
                     return None
 
             visibility, scoring = await asyncio.gather(run_visibility(), run_scoring())
             report.ai_visibility = visibility
             report.validation_score = scoring
-            async for chunk in finalize_and_yield(): yield chunk
+            async for chunk in finalize_and_yield():
+                yield chunk
 
             # ── Verification Loop ──
             try:
                 track(f"verification_v{iteration}", AgentStatus.RUNNING)
-                async for chunk in finalize_and_yield(): yield chunk
+                async for chunk in finalize_and_yield():
+                    yield chunk
 
                 vf = await self._verification_agent.run(report=report)
                 track(f"verification_v{iteration}", AgentStatus.COMPLETED)
 
                 if vf.passed:
                     logger.info("Verification passed on iteration %d.", iteration + 1)
-                    async for chunk in finalize_and_yield(): yield chunk
+                    async for chunk in finalize_and_yield():
+                        yield chunk
                     break
                 else:
                     logger.warning("Verification failed: %s", vf.feedback)
                     feedback = "\n".join(f"- {f}" for f in vf.feedback)
-                    async for chunk in finalize_and_yield(): yield chunk
+                    async for chunk in finalize_and_yield():
+                        yield chunk
             except Exception as e:
                 track(f"verification_v{iteration}", AgentStatus.FAILED, str(e))
                 logger.error("Verification failed to run: %s", e)
-                async for chunk in finalize_and_yield(): yield chunk
+                async for chunk in finalize_and_yield():
+                    yield chunk
                 break
 
         # ── Step 6: Hera Dashboard Video (non-blocking) ────────────────
@@ -458,12 +499,14 @@ class OrchestratorAgent:
                     status="processing",
                     prompt_used=video_prompt,
                 )
-                async for chunk in finalize_and_yield(): yield chunk
+                async for chunk in finalize_and_yield():
+                    yield chunk
             except Exception as e:
                 logger.warning("Hera video generation failed: %s", e)
 
         # ── Finalize ──────────────────────────────────────────────────
-        async for chunk in finalize_and_yield(): yield chunk
+        async for chunk in finalize_and_yield():
+            yield chunk
 
     def _build_hera_prompt(self, report: FullReport) -> str:
         """Build a Hera video prompt from the report data."""

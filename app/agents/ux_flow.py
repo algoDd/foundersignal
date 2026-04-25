@@ -77,7 +77,9 @@ class UXFlowAgent(BaseAgent):
 
         return await self.generate_structured(prompt, UXFlow)
 
-    async def run_stream_text(self, *, refined_idea_text: str, market_research_text: str | None = None):
+    async def run_stream_text(
+        self, *, refined_idea_text: str, market_research_text: str | None = None
+    ):
         """Design the UX flow based on text context and stream markdown."""
         prompt = (
             "Tell the story of the user journey for the following product concept in Markdown.\n\n"

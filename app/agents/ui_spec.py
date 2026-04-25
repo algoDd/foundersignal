@@ -67,7 +67,8 @@ class UISpecAgent(BaseAgent):
     async def run_stream_text(self, *, refined_idea_text: str, ux_flow_text: str):
         """Generate UI specifications based on text context and stream markdown."""
         prompt = (
-            "Describe the visual prototype and landing page for the following product concept and user journey in Markdown.\n\n"
+            "Describe the visual prototype and landing page for the following product "
+            "concept and user journey in Markdown.\n\n"
             f"## The Concept\n{refined_idea_text}\n\n"
             f"## The Journey\n{ux_flow_text}\n\n"
             "Produce a visual specification report including:\n"

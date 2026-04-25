@@ -20,9 +20,10 @@ class ValidationScoringAgent(BaseAgent):
 
     name = "validation_scoring"
     system_prompt = (
-        "You are a product validation expert. Score concepts (startups, existing products, or new features) objectively across "
-        "multiple dimensions. Be honest—a 50/100 is fine if the concept has issues. "
-        "Provide clear reasoning for each score and actionable next steps."
+        "You are a product validation expert. Score concepts (startups, existing products, "
+        "or new features) objectively across multiple dimensions. Be honest—a 50/100 "
+        "is fine if the concept has issues. Provide clear reasoning for each score "
+        "and actionable next steps."
     )
 
     async def run(
@@ -62,10 +63,17 @@ class ValidationScoringAgent(BaseAgent):
 
         return await self.generate_structured(prompt, ValidationScore)
 
-    async def run_stream_text(self, *, refined_idea_text: str, market_research_text: str | None = None, competitor_research_text: str | None = None):
+    async def run_stream_text(
+        self,
+        *,
+        refined_idea_text: str,
+        market_research_text: str | None = None,
+        competitor_research_text: str | None = None,
+    ):
         """Score the concept based on text context and stream markdown."""
         prompt = (
-            "Produce a final Validation Score and Detailed Verdict for the following product concept in Markdown.\n\n"
+            "Produce a final Validation Score and Detailed Verdict for the following "
+            "product concept in Markdown.\n\n"
             f"## Refined Concept\n{refined_idea_text}\n\n"
         )
         if market_research_text:
@@ -88,7 +96,8 @@ class ValidationScoringAgent(BaseAgent):
             "## Key Risks & Warning Signs\n"
             "## Critical Next Steps\n"
             "## Executive Summary & Rationale\n"
-            "\nIMPORTANT: Do NOT leave scores as 0 unless the concept is truly non-viable. Be objective but thorough."
+            "\nIMPORTANT: Do NOT leave scores as 0 unless the concept is truly "
+            "non-viable. Be objective but thorough."
         )
 
         async for chunk in self.stream_text(prompt):

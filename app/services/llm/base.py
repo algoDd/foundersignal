@@ -67,10 +67,12 @@ class BaseLLMProvider(ABC):
         schema_json = json.dumps(response_model.model_json_schema(), indent=2)
         structured_prompt = (
             f"{prompt}\n\n"
-            f"IMPORTANT: You MUST return ONLY a raw JSON object containing the POPULATED DATA based on your analysis.\n"
-            f"DO NOT output the JSON schema itself. Use the schema below strictly to structure your resulting JSON data:\n"
+            "IMPORTANT: You MUST return ONLY a raw JSON object containing the "
+            "POPULATED DATA based on your analysis.\n"
+            "DO NOT output the JSON schema itself. Use the schema below strictly to "
+            "structure your resulting JSON data:\n"
             f"```json\n{schema_json}\n```\n"
-            f"Respond ONLY with the final JSON data. Do not include any other text."
+            "Respond ONLY with the final JSON data. Do not include any other text."
         )
         raw, tokens = await self.generate(
             structured_prompt,

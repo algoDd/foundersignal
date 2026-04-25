@@ -13,8 +13,9 @@ class AIVisibilityAgent(BaseAgent):
     name = "ai_visibility"
     system_prompt = (
         "You are an AI search visibility expert (Generative Engine Optimization). "
-        "Analyze how a product concept (startup, existing product, or new feature) would appear in AI search engines like "
-        "ChatGPT, Perplexity, Claude, and Google AI Overviews."
+        "Analyze how a product concept (startup, existing product, or new feature) "
+        "would appear in AI search engines like ChatGPT, Perplexity, Claude, and "
+        "Google AI Overviews."
     )
 
     def __init__(self, peec: PeecService | None = None, **kwargs) -> None:
@@ -59,7 +60,9 @@ class AIVisibilityAgent(BaseAgent):
 
         return await self.generate_structured(prompt, AIVisibility)
 
-    async def run_stream_text(self, *, refined_idea_text: str, competitor_research_text: str | None = None):
+    async def run_stream_text(
+        self, *, refined_idea_text: str, competitor_research_text: str | None = None
+    ):
         """Analyze AI search visibility based on text context and stream markdown."""
         peec_context = ""
         if self._peec:
@@ -70,7 +73,8 @@ class AIVisibilityAgent(BaseAgent):
                 self._logger.warning("Peec AI failed: %s", e)
 
         prompt = (
-            "Analyze AI search visibility and Generative Engine Optimization (GEO) for the following product concept in Markdown.\n\n"
+            "Analyze AI search visibility and Generative Engine Optimization (GEO) for the"
+            " following product concept in Markdown.\n\n"
             f"## Refined Concept\n{refined_idea_text}\n\n"
         )
         if competitor_research_text:

@@ -279,14 +279,20 @@ class DashboardVideo(BaseModel):
 class OptimizedQuery(BaseModel):
     """Output of the Query Optimizer Agent."""
 
-    query: str = Field(..., max_length=400, description="Optimized search query, guaranteed under 400 characters")
+    query: str = Field(
+        ...,
+        max_length=400,
+        description="Optimized search query, guaranteed under 400 characters",
+    )
 
 
 class VerificationFeedback(BaseModel):
     """Output of the Verification Agent."""
 
     passed: bool = Field(..., description="Whether the report meets all criteria")
-    feedback: list[str] = Field(default_factory=list, description="Specific feedback points if not passed")
+    feedback: list[str] = Field(
+        default_factory=list, description="Specific feedback points if not passed"
+    )
 
 
 # =============================================================================

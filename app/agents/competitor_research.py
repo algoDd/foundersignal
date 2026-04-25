@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from app.agents.base import BaseAgent
-from app.agents.query_optimizer import QueryOptimizerAgent
 from app.models.schemas import CompetitorAnalysis, RefinedIdea
 from app.services.tavily_service import TavilyService
 
@@ -17,7 +16,8 @@ class CompetitorResearchAgent(BaseAgent):
     name = "competitor_research"
     system_prompt = (
         "You are a competitive intelligence analyst. Your job is to identify "
-        "direct and indirect competitors for a product concept (startup, existing product, or new feature), "
+        "direct and indirect competitors for a product concept "
+        "(startup, existing product, or new feature), "
         "analyze their strengths and weaknesses, and find positioning gaps. "
         "Be thorough—include both well-known players and emerging startups. "
         "Always provide specific details about features, pricing, and positioning."
@@ -110,7 +110,8 @@ class CompetitorResearchAgent(BaseAgent):
                 self.add_search(query, len(results), current_sources)
 
         prompt = (
-            "Analyze the following product concept and competitive data to produce a detailed Competitor Analysis Report in Markdown.\n\n"
+            "Analyze the following product concept and competitive data to produce a detailed "
+            "Competitor Analysis Report in Markdown.\n\n"
             f"## Refined Concept\n{refined_idea_text}\n\n"
         )
         if search_context:

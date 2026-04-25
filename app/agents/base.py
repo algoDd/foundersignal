@@ -47,12 +47,14 @@ class BaseAgent(ABC):
 
     def add_search(self, query: str, results_count: int, sources: list[str]) -> None:
         """Track a search conducted by the agent."""
-        self.searches.append({
-            "query": query,
-            "results_count": results_count,
-            "sources": sources,
-            "timestamp": time.time()
-        })
+        self.searches.append(
+            {
+                "query": query,
+                "results_count": results_count,
+                "sources": sources,
+                "timestamp": time.time(),
+            }
+        )
 
     @abstractmethod
     async def run(self, **kwargs: Any) -> BaseModel:

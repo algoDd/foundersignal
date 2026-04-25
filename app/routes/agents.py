@@ -21,19 +21,31 @@ from app.services.tavily_service import get_tavily_service
 router = APIRouter()
 logger = logging.getLogger("foundersignal.routes.agents")
 
+
 async def agent_stream_generator(agent, method_name, **kwargs):
     """Generic generator for agent streaming."""
     try:
         method = getattr(agent, method_name)
         async for chunk in method(**kwargs):
             # Send as SSE chunk
-            yield f"data: {json.dumps({'chunk': chunk, 'tokens': agent.tokens_used, 'searches': agent.searches})}\n\n"
+            data = {
+                "chunk": chunk,
+                "tokens": agent.tokens_used,
+                "searches": agent.searches,
+            }
+            yield f"data: {json.dumps(data)}\n\n"
 
         # Send final completion event with total tokens and all searches
-        yield f"data: {json.dumps({'done': True, 'tokens': agent.tokens_used, 'searches': agent.searches})}\n\n"
+        final_data = {
+            "done": True,
+            "tokens": agent.tokens_used,
+            "searches": agent.searches,
+        }
+        yield f"data: {json.dumps(final_data)}\n\n"
     except Exception as e:
         logger.error(f"Agent {agent.name} error: {e}", exc_info=True)
         yield f"data: {json.dumps({'error': str(e)})}\n\n"
+
 
 @router.post("/refine")
 async def refine_idea(idea_input: IdeaInput):
@@ -41,8 +53,9 @@ async def refine_idea(idea_input: IdeaInput):
     agent = IdeaRefinementAgent()
     return StreamingResponse(
         agent_stream_generator(agent, "run_stream", idea_input=idea_input),
-        media_type="text/event-stream"
+        media_type="text/event-stream",
     )
+
 
 @router.post("/market")
 async def market_research(request: Request):
@@ -53,8 +66,9 @@ async def market_research(request: Request):
     agent = MarketResearchAgent(tavily=tavily)
     return StreamingResponse(
         agent_stream_generator(agent, "run_stream_text", refined_idea_text=refined_idea_text),
-        media_type="text/event-stream"
+        media_type="text/event-stream",
     )
+
 
 @router.post("/competitors")
 async def competitor_research(request: Request):
@@ -65,8 +79,9 @@ async def competitor_research(request: Request):
     agent = CompetitorResearchAgent(tavily=tavily)
     return StreamingResponse(
         agent_stream_generator(agent, "run_stream_text", refined_idea_text=refined_idea_text),
-        media_type="text/event-stream"
+        media_type="text/event-stream",
     )
+
 
 @router.post("/ux")
 async def ux_flow(request: Request):
@@ -76,9 +91,15 @@ async def ux_flow(request: Request):
     market_research_text = body.get("market_research", "")
     agent = UXFlowAgent()
     return StreamingResponse(
-        agent_stream_generator(agent, "run_stream_text", refined_idea_text=refined_idea_text, market_research_text=market_research_text),
-        media_type="text/event-stream"
+        agent_stream_generator(
+            agent,
+            "run_stream_text",
+            refined_idea_text=refined_idea_text,
+            market_research_text=market_research_text,
+        ),
+        media_type="text/event-stream",
     )
+
 
 @router.post("/ui")
 async def ui_spec(request: Request):
@@ -88,9 +109,15 @@ async def ui_spec(request: Request):
     ux_flow_text = body.get("ux_flow", "")
     agent = UISpecAgent()
     return StreamingResponse(
-        agent_stream_generator(agent, "run_stream_text", refined_idea_text=refined_idea_text, ux_flow_text=ux_flow_text),
-        media_type="text/event-stream"
+        agent_stream_generator(
+            agent,
+            "run_stream_text",
+            refined_idea_text=refined_idea_text,
+            ux_flow_text=ux_flow_text,
+        ),
+        media_type="text/event-stream",
     )
+
 
 @router.post("/visibility")
 async def ai_visibility(request: Request):
@@ -101,9 +128,15 @@ async def ai_visibility(request: Request):
     peec = get_peec_service()
     agent = AIVisibilityAgent(peec=peec)
     return StreamingResponse(
-        agent_stream_generator(agent, "run_stream_text", refined_idea_text=refined_idea_text, competitor_research_text=competitor_research_text),
-        media_type="text/event-stream"
+        agent_stream_generator(
+            agent,
+            "run_stream_text",
+            refined_idea_text=refined_idea_text,
+            competitor_research_text=competitor_research_text,
+        ),
+        media_type="text/event-stream",
     )
+
 
 @router.post("/scoring")
 async def validation_scoring(request: Request):
@@ -114,9 +147,16 @@ async def validation_scoring(request: Request):
     competitor_research_text = body.get("competitor_research", "")
     agent = ValidationScoringAgent()
     return StreamingResponse(
-        agent_stream_generator(agent, "run_stream_text", refined_idea_text=refined_idea_text, market_research_text=market_research_text, competitor_research_text=competitor_research_text),
-        media_type="text/event-stream"
+        agent_stream_generator(
+            agent,
+            "run_stream_text",
+            refined_idea_text=refined_idea_text,
+            market_research_text=market_research_text,
+            competitor_research_text=competitor_research_text,
+        ),
+        media_type="text/event-stream",
     )
+
 
 @router.post("/verify")
 async def verify_report(request: Request):
@@ -124,11 +164,13 @@ async def verify_report(request: Request):
     body = await request.json()
     full_report_markdown = body.get("full_report", "")
     from app.agents.verification import VerificationAgent
+
     agent = VerificationAgent()
     return StreamingResponse(
         agent_stream_generator(agent, "run_stream_text", full_report_markdown=full_report_markdown),
-        media_type="text/event-stream"
+        media_type="text/event-stream",
     )
+
 
 @router.get("/usage")
 async def get_usage():

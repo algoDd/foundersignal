@@ -3,14 +3,16 @@
 This agent can be run standalone for quick audits or as part of the main
 orchestration pipeline.
 """
+
 from __future__ import annotations
+
 import argparse
 import asyncio
 import datetime
 import json
 import os
 import random
-from typing import Annotated, Any, Dict, List, TypedDict
+from typing import Annotated, Any, TypedDict
 
 from dotenv import load_dotenv
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -20,7 +22,6 @@ from pydantic import BaseModel, Field
 
 from app.agents.base import BaseAgent
 from app.models.schemas import CustomerValidationReport, RefinedIdea
-
 
 # --- 1. SCHEMAS & MODELS ---
 
@@ -37,7 +38,7 @@ class SyntheticUser(BaseModel):
     name: str
     archetype: str
     ocean: OceanProfile
-    context: Dict[str, Any]
+    context: dict[str, Any]
 
     def bio(self) -> str:
         ctx_str = ", ".join(
@@ -47,17 +48,17 @@ class SyntheticUser(BaseModel):
 
 
 class InterviewResult(TypedDict):
-    customer_info: Dict[str, Any]
+    customer_info: dict[str, Any]
     response: str
 
 
 class State(TypedDict):
     product_idea: str
-    target_variables: List[str]
-    archetypes: List[str]
-    cohort: List[SyntheticUser]
-    interview_results: List[InterviewResult]
-    raw_feedbacks: Annotated[List[str], lambda x, y: x + y]  # Appends list items
+    target_variables: list[str]
+    archetypes: list[str]
+    cohort: list[SyntheticUser]
+    interview_results: list[InterviewResult]
+    raw_feedbacks: Annotated[list[str], lambda x, y: x + y]  # Appends list items
     final_audit: str
 
 
@@ -137,8 +138,9 @@ class CustomerValidationAgent(BaseAgent):
         """Uses the LLM to parse the raw text report into a structured model."""
         prompt = (
             "Parse the following synthetic audit report into a structured JSON object. "
-            "Extract the Market Fit Score, Key Objections, Surprising Insights, and Recommended Pivot. "
-            "The objections, insights, and pivot should be lists of strings.\n\n"
+            "Extract the Market Fit Score, Key Objections, Surprising Insights, and "
+            "Recommended Pivot. The objections, insights, and pivot should be lists of "
+            "strings.\n\n"
             f"REPORT:\n{report_text}"
         )
         return await self.generate_structured(prompt, CustomerValidationReport)
@@ -150,18 +152,20 @@ class CustomerValidationAgent(BaseAgent):
         print(f"[*] Analyzing product: {state['product_idea'][:50]}...")
         prompt = f"""
         Product: {state["product_idea"]}
-        Identify a minimum of {DEMOGRAPHIC_SIZE} most critical demographic/psychographic variables to test.
+        Identify a minimum of {DEMOGRAPHIC_SIZE} most critical demographic/psychographic
+        variables to test.
         Return ONLY a JSON list of strings. Example: ["age", "tech_literacy", "disposable_income"]
         """
         res = asyncio.run(self.generate_text(prompt))
-        vars = json.loads(res.strip())
-        return {"target_variables": vars}
+        variables = json.loads(res.strip())
+        return {"target_variables": variables}
 
     def _persona_strategist_node(self, state: State):
         """Determines the most relevant archetypes for the product."""
         print("[*] Determining best-fit archetypes...")
         prompt = f"""
-        Based on the product idea: '{state["product_idea"]}', identify the {COHORT_SIZE} most critical and diverse user archetypes to interview.
+        Based on the product idea: '{state["product_idea"]}', identify the {COHORT_SIZE}
+        most critical and diverse user archetypes to interview.
         Consider the user base, potential stakeholders, and critics.
         Examples: "Early Adopter," "Skeptical Professional," "Privacy-Concerned User," etc.
         Return ONLY a JSON list of strings with the {COHORT_SIZE} archetype names.
@@ -188,7 +192,8 @@ class CustomerValidationAgent(BaseAgent):
             for _ in range(num_customers_for_archetype):
                 customer_count += 1
                 ctx_prompt = f"""
-                Create a unique person profile for the demographic variables: {state["target_variables"]}.
+                Create a unique person profile for the demographic variables:
+                {state["target_variables"]}.
                 This persona MUST embody the archetype: '{archetype_name}'.
                 Be nuanced and avoid stereotypes. Give them a specific background and values.
                 Return ONLY valid JSON.
@@ -208,16 +213,16 @@ class CustomerValidationAgent(BaseAgent):
     def _generate_ocean_profile(self, archetype_name: str) -> OceanProfile:
         """Generates an OCEAN profile with archetype-influenced biases."""
         params = {
-            "openness": random.uniform(0.2, 0.8),
-            "conscientiousness": random.uniform(0.2, 0.8),
-            "extraversion": random.uniform(0.2, 0.8),
-            "agreeableness": random.uniform(0.2, 0.8),
-            "neuroticism": random.uniform(0.2, 0.8),
+            "openness": random.uniform(0.2, 0.8),  # noqa: S311
+            "conscientiousness": random.uniform(0.2, 0.8),  # noqa: S311
+            "extraversion": random.uniform(0.2, 0.8),  # noqa: S311
+            "agreeableness": random.uniform(0.2, 0.8),  # noqa: S311
+            "neuroticism": random.uniform(0.2, 0.8),  # noqa: S311
         }
         if "skeptic" in archetype_name.lower():
-            params["agreeableness"] = random.uniform(0.1, 0.4)
+            params["agreeableness"] = random.uniform(0.1, 0.4)  # noqa: S311
         if "early adopter" in archetype_name.lower():
-            params["openness"] = random.uniform(0.7, 1.0)
+            params["openness"] = random.uniform(0.7, 1.0)  # noqa: S311
         return OceanProfile(**params)
 
     def _save_personas_node(self, state: State):
@@ -237,9 +242,15 @@ class CustomerValidationAgent(BaseAgent):
         print(f"[*] Running {len(state['cohort'])} interviews in parallel...")
 
         async def interview(user: SyntheticUser) -> InterviewResult:
-            system = f"Identity: {user.bio()}\nYou are participating in a blind market test. Be authentic. If your personality or context suggests you would dislike this, BE HARSH."
+            system = (
+                f"Identity: {user.bio()}\nYou are participating in a blind market test. "
+                "Be authentic. If your personality or context suggests you would "
+                "dislike this, BE HARSH."
+            )
             msg = f"Give me your honest, visceral reaction to this idea: {state['product_idea']}"
-            llm = ChatGoogleGenerativeAI(model="gemini-2.5-pro", temperature=0.7) # Temp instance for async
+            llm = ChatGoogleGenerativeAI(
+                model="gemini-1.5-pro", temperature=0.7
+            )  # Temp instance for async
             res = await llm.ainvoke([SystemMessage(content=system), HumanMessage(content=msg)])
             return {"customer_info": user.model_dump(), "response": str(res.content)}
 
@@ -250,7 +261,6 @@ class CustomerValidationAgent(BaseAgent):
             for result in interview_results
         ]
         return {"interview_results": interview_results, "raw_feedbacks": raw_feedbacks}
-
 
     def _save_interviews_node(self, state: State):
         """Saves all interview results to a single JSON file."""
@@ -268,7 +278,8 @@ class CustomerValidationAgent(BaseAgent):
         print("[*] Synthesizing final audit report...")
         combined = "\n\n".join(state["raw_feedbacks"])
         prompt = f"""
-        You are 'The Synthetic Auditor'. Analyze these feedback transcripts for the product: {state["product_idea"]}
+        You are 'The Synthetic Auditor'. Analyze these feedback transcripts for the
+        product: {state["product_idea"]}
         Transcripts:\n{combined}
         Provide:
         1. MARKET FIT SCORE (0-100)
@@ -282,7 +293,9 @@ class CustomerValidationAgent(BaseAgent):
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         report_path = os.path.join("reports", f"audit_report_{timestamp}.md")
         with open(report_path, "w") as f:
-            f.write(f"# Synthetic Audit Report\n\n**Product Idea:** {state['product_idea']}\n\n{res}")
+            f.write(
+                f"# Synthetic Audit Report\n\n**Product Idea:** {state['product_idea']}\n\n{res}"
+            )
         print(f"[*] Audit report saved to {report_path}")
         return {"final_audit": res}
 
@@ -300,7 +313,7 @@ if __name__ == "__main__":
     else:
         idea_text = ""
         if args.file:
-            with open(args.file, "r") as f:
+            with open(args.file) as f:
                 idea_text = f.read()
         else:
             idea_text = args.idea
@@ -311,7 +324,7 @@ if __name__ == "__main__":
             solution_hypothesis="",
             target_audience="",
             value_proposition="",
-            business_model=""
+            business_model="",
         )
 
         # Instantiate and run the agent

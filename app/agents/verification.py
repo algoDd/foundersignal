@@ -10,7 +10,7 @@ from app.models.schemas import FullReport, VerificationFeedback
 
 class VerificationAgent(BaseAgent):
     """Reviews the generated report across all outputs and gives feedback.
-    
+
     If the report is lacking depth, has contradictory points, or misses
     crucial details, it provides feedback to be used in a re-iteration.
     """
@@ -35,7 +35,16 @@ class VerificationAgent(BaseAgent):
             VerificationFeedback with boolean passed and list of feedback strings.
         """
         # Dump the report to JSON, ignoring None values and omitting video metadata
-        report_data = report.model_dump(exclude_none=True, exclude={"dashboard_video", "agent_progress", "total_duration_seconds", "report_id", "created_at"})
+        report_data = report.model_dump(
+            exclude_none=True,
+            exclude={
+                "dashboard_video",
+                "agent_progress",
+                "total_duration_seconds",
+                "report_id",
+                "created_at",
+            },
+        )
         report_json = json.dumps(report_data, default=str)
 
         prompt = (

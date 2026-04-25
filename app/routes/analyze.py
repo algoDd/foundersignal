@@ -93,4 +93,4 @@ async def analyze_idea_stream(idea_input: IdeaInput):
 
     except Exception as e:
         logger.error("Streaming setup failed: %s", e)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from app.agents.base import BaseAgent
-from app.agents.query_optimizer import QueryOptimizerAgent
 from app.models.schemas import MarketResearch, RefinedIdea
 from app.services.tavily_service import TavilyService
 
@@ -114,7 +113,8 @@ class MarketResearchAgent(BaseAgent):
                 self.add_search(full_query, len(results), current_sources)
 
         prompt = (
-            "Analyze the following product concept and market data to produce a detailed Market Research Report in Markdown.\n\n"
+            "Analyze the following product concept and market data to produce a detailed "
+            "Market Research Report in Markdown.\n\n"
             f"## Refined Concept\n{refined_idea_text}\n\n"
         )
         if search_context:
