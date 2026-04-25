@@ -2,10 +2,12 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Activity, Sparkles, Target, Zap, CheckCircle2, Cpu, BarChart3,
   Layout, Layers, Globe, Search, ArrowRight, Clock, BarChart2,
-  Users, Settings, ChevronRight, Volume2, Square, Plus, AlertCircle,
-  TrendingUp, FileText,
+  Users, Settings, ChevronRight, Volume2, Square, Plus, Radio,
+  TrendingUp, FileText, Download,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
+
+const TOTAL_INTERVIEWS = 5; // matches the 5 hardcoded archetypes in customer_validation_agent.py
 
 const AGENTS = [
   { id: 'refine',      label: 'Idea Refinement',    icon: Sparkles,  endpoint: '/refine' },
@@ -684,17 +686,17 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Row 3: Alerts + Recent Sessions side by side */}
+              {/* Row 3: Status + Recent Sessions side by side */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 18 }}>
 
-                {/* Alerts */}
+                {/* Status */}
                 <div className="card">
                   <div className="card-header">
                     <div className="card-title">
-                      <div className="card-title-icon" style={{ background: 'rgba(239,68,68,0.10)' }}>
-                        <AlertCircle size={14} color="#dc2626" />
+                      <div className="card-title-icon" style={{ background: 'rgba(108,99,255,0.10)' }}>
+                        <Radio size={14} color="var(--primary)" />
                       </div>
-                      Alerts
+                      Status
                     </div>
                   </div>
                   <div className="alert-list">
@@ -756,6 +758,26 @@ export default function App() {
           {/* ── Agent result tabs ── */}
           {activeTab !== 'overview' && activeTab !== 'interviews' && (
             <div className="content-card fade-in">
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 16 }}>
+                <button
+                  className="btn-ghost"
+                  style={{ gap: 6 }}
+                  disabled={!results[activeTab]}
+                  title="Download as Markdown"
+                  onClick={() => {
+                    const label = AGENTS.find(a => a.id === activeTab)?.label || activeTab;
+                    const blob = new Blob([results[activeTab]], { type: 'text/markdown' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `${label.toLowerCase().replace(/\s+/g, '-')}.md`;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                  }}
+                >
+                  <Download size={13} /> Download
+                </button>
+              </div>
               <div className="markdown-content">
                 <ReactMarkdown>{results[activeTab] || ''}</ReactMarkdown>
               </div>
@@ -766,6 +788,7 @@ export default function App() {
           {activeTab === 'interviews' && (
             <div className="interview-wrap fade-in">
               <div className="interview-list">
+                {/* Real interviews that have arrived */}
                 {interviews.map((int, idx) => (
                   <button
                     key={idx}
@@ -781,6 +804,17 @@ export default function App() {
                       ? <CheckCircle2 size={13} style={{ marginLeft: 'auto', color: 'var(--success)', flexShrink: 0 }} />
                       : <div className="spinner" style={{ width: 12, height: 12, marginLeft: 'auto', flexShrink: 0 }} />}
                   </button>
+                ))}
+                {/* Skeleton placeholders for interviews not yet streamed */}
+                {isSimulating && Array.from({ length: TOTAL_INTERVIEWS - interviews.length }).map((_, i) => (
+                  <div key={`skeleton-${i}`} className="interview-row interview-skeleton">
+                    <div className="interview-avatar skeleton-avatar" />
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <div className="skeleton-line" style={{ width: '70%', height: 11, marginBottom: 5 }} />
+                      <div className="skeleton-line" style={{ width: '50%', height: 9 }} />
+                    </div>
+                    <div className="skeleton-dot" />
+                  </div>
                 ))}
               </div>
 
