@@ -49,3 +49,5 @@ frontend/dist/
 # Misc
 *.log
 tmp/
+outputs/
+reports/
