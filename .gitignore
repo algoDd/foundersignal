@@ -51,3 +51,4 @@ frontend/dist/
 tmp/
 outputs/
 reports/
+.env

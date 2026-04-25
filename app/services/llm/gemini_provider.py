@@ -18,7 +18,7 @@ class GeminiProvider(BaseLLMProvider):
         if not api_key:
             msg = "GEMINI_API_KEY is required. Get one from https://aistudio.google.com/"
             raise ValueError(msg)
-        genai.configure(api_key=api_key)
+        self._client = genai.Client(api_key=api_key)
         self._model = model
         logger.info("Gemini provider ready — model: %s", model)
 
@@ -40,13 +40,13 @@ class GeminiProvider(BaseLLMProvider):
             config.system_instruction = system_prompt
 
         max_retries = 5
-        retry_delay = 2
+        retry_delay = 5
         for i in range(max_retries):
             try:
-                model = genai.GenerativeModel(self._model)
-                response = model.generate_content(
+                response = self._client.models.generate_content(
+                    model=self._model,
                     contents=prompt,
-                    generation_config=config,
+                    config=config,
                 )
                 tokens = response.usage_metadata.total_token_count if response.usage_metadata else 0
                 return response.text or "", tokens
@@ -63,7 +63,10 @@ class GeminiProvider(BaseLLMProvider):
                     await asyncio.sleep(sleep_time)
                     retry_delay *= 2
                     continue
-                raise e
+                logger.error("Gemini error (generate): %s", e)
+                raise
+
+        return "", 0
 
     async def stream(
         self,
@@ -73,7 +76,7 @@ class GeminiProvider(BaseLLMProvider):
         temperature: float = 0.7,
         max_tokens: int = 8192,
     ):
-        """Stream text using Gemini."""
+        """Stream text generation from Gemini."""
         config = types.GenerateContentConfig(
             temperature=temperature,
             max_output_tokens=max_tokens,
@@ -83,19 +86,19 @@ class GeminiProvider(BaseLLMProvider):
             config.system_instruction = system_prompt
 
         max_retries = 5
-        retry_delay = 2
+        retry_delay = 5
         for i in range(max_retries):
             try:
-                model = genai.GenerativeModel(self._model)
-                response_stream = model.generate_content(
+                response_stream = self._client.models.generate_content_stream(
+                    model=self._model,
                     contents=prompt,
-                    generation_config=config,
-                    stream=True,
+                    config=config,
                 )
                 for chunk in response_stream:
+                    text = chunk.text or ""
                     tokens = chunk.usage_metadata.total_token_count if chunk.usage_metadata else 0
-                    yield chunk.text or "", tokens
-                return  # Success
+                    yield text, tokens
+                return
             except ClientError as e:
                 is_rate_limit = "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e)
                 if i < max_retries - 1 and is_rate_limit:
@@ -109,7 +112,8 @@ class GeminiProvider(BaseLLMProvider):
                     await asyncio.sleep(sleep_time)
                     retry_delay *= 2
                     continue
-                raise e
+                logger.error("Gemini error (stream): %s", e)
+                raise
 
     async def close(self) -> None:
         """No persistent connection to close for Gemini REST client."""
