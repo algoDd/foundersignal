@@ -51,4 +51,6 @@ frontend/dist/
 tmp/
 outputs/
 reports/
-.env
+.env*
+*.env
+.env.local

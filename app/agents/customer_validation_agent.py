@@ -145,7 +145,107 @@ class CustomerValidationAgent(BaseAgent):
         )
         return await self.generate_structured(prompt, CustomerValidationReport)
 
-    # --- LangGraph Nodes ---
+    async def run_stream_interviews(
+        self, 
+        *, 
+        refined_idea: RefinedIdea,
+        market_research_text: str | None = None,
+        competitor_analysis_text: str | None = None,
+        ux_flow_text: str | None = None,
+        ui_spec_text: str | None = None,
+        visibility_text: str | None = None,
+        scoring_text: str | None = None
+    ):
+        """
+        Runs a live simulation of customer interviews and streams them.
+        Injects full research context for highly realistic feedback.
+        """
+        # Build the comprehensive context block
+        context_parts = [
+            f"PRODUCT VISION:\n{refined_idea.elevator_pitch}",
+            f"PROBLEM STATEMENT:\n{refined_idea.problem_statement}",
+            f"PROPOSED SOLUTION:\n{refined_idea.solution_hypothesis}"
+        ]
+        
+        if market_research_text:
+            context_parts.append(f"MARKET INSIGHTS:\n{market_research_text[:2000]}...")
+        if competitor_analysis_text:
+            context_parts.append(f"COMPETITOR GAPS:\n{competitor_analysis_text[:2000]}...")
+        if ux_flow_text:
+            context_parts.append(f"USER JOURNEY:\n{ux_flow_text[:2000]}...")
+        if ui_spec_text:
+            context_parts.append(f"VISUAL PROTOTYPE:\n{ui_spec_text[:2000]}...")
+        if scoring_text:
+            context_parts.append(f"VALIDATION AUDIT:\n{scoring_text[:1000]}...")
+
+        full_research_dossier = "\n\n---\n\n".join(context_parts)
+
+        # 1. Identify archetypes (Simpler for streaming)
+        archetypes = ["Early Adopter", "Skeptical Stakeholder", "Industry Veteran", "Cost-Conscious User", "Practical Implementer"]
+        
+        for archetype in archetypes:
+            # 2. Generate a persona context
+            ctx_prompt = f"""
+            Create a unique person profile for a user interview.
+            This persona MUST embody the archetype: '{archetype}'.
+            Focus on their role, pain points, and what they value in a solution.
+            
+            Based on this Product Dossier:
+            {full_research_dossier[:4000]}
+            
+            Return ONLY valid JSON with keys: name, role, background, values.
+            """
+            ctx_res, _ = await self._llm.generate(ctx_prompt, temperature=0.8)
+            try:
+                # Clean up the response if it has markdown blocks
+                clean_json = ctx_res.strip()
+                if "```json" in clean_json:
+                    clean_json = clean_json.split("```json")[1].split("```")[0].strip()
+                elif "```" in clean_json:
+                    clean_json = clean_json.split("```")[1].strip()
+                
+                ctx_data = json.loads(clean_json)
+            except Exception:
+                ctx_data = {"name": f"User_{archetype.replace(' ', '_')}", "role": archetype, "background": "Unknown", "values": "Efficiency"}
+
+            user = SyntheticUser(
+                name=ctx_data.get("name", "User"),
+                archetype=archetype,
+                ocean=self._generate_ocean_profile(archetype),
+                context=ctx_data
+            )
+
+            # 3. Conduct the interview
+            system = (
+                f"Identity: {user.bio()}\n"
+                "You are participating in a deep-dive interview about a new product idea and its technical/market research. "
+                "You have been shown the vision, the market data, and even the proposed UX/UI prototypes. "
+                "Be authentic to your persona. If you are a skeptic, challenge the assumptions in the research. "
+                "If you are an industry veteran, comment on the market fit and competitor gaps. "
+                "Keep your response visceral and honest. 2-3 short, impactful paragraphs."
+            )
+            msg = f"Give me your honest, visceral reaction to this entire product dossier: {full_research_dossier[:5000]}"
+            
+            # Use our centralized LLM provider for streaming the response
+            full_response = ""
+            async for chunk, _ in self._llm.stream(msg, system_prompt=system):
+                full_response += chunk
+                # Yield a partial update for the UI
+                yield {
+                    "user": user.model_dump(),
+                    "chunk": chunk,
+                    "is_complete": False
+                }
+            
+            yield {
+                "user": user.model_dump(),
+                "response": full_response,
+                "is_complete": True
+            }
+            # Small delay between interviews for dramatic effect and rate limiting
+            await asyncio.sleep(1)
+
+    # --- LangGraph Nodes (Keep for batch runs) ---
 
     def _strategist_node(self, state: State):
         """Analyzes product to decide who we should interview."""

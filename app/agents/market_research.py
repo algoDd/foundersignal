@@ -95,8 +95,9 @@ class MarketResearchAgent(BaseAgent):
                 "market size TAM growth trends 2024 2025",
                 "market opportunity and risks",
             ]
-            # Prepend context from the refined idea if possible
-            idea_summary = refined_idea_text[:500]
+            # Extract a very brief context for searching
+            context_limit = 150
+            idea_summary = refined_idea_text[:context_limit]
             for query in queries:
                 full_query = f"{idea_summary} {query}"
                 if len(full_query) > 380:

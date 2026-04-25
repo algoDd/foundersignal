@@ -23,12 +23,14 @@ format: ## Auto-format code with ruff
 	uv run ruff check --fix .
 	uv run ruff format .
 
-clean: ## Remove build artifacts and caches
+clean: ## Remove build artifacts, caches, and orphaned processes
 	find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
 	find . -type d -name ".pytest_cache" -exec rm -rf {} + 2>/dev/null || true
 	find . -type d -name ".ruff_cache" -exec rm -rf {} + 2>/dev/null || true
 	find . -type d -name "*.egg-info" -exec rm -rf {} + 2>/dev/null || true
 	rm -rf dist/ build/ htmlcov/ .coverage coverage.xml
+	@echo "Killing any processes on port 8000..."
+	@lsof -ti :8000 | xargs kill -9 2>/dev/null || true
 
 build: ## Build the package
 	uv build

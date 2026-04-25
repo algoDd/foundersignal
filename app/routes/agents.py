@@ -10,6 +10,7 @@ from app.agents.ai_visibility import AIVisibilityAgent
 from app.agents.competitor_research import CompetitorResearchAgent
 from app.agents.idea_refinement import IdeaRefinementAgent
 from app.agents.market_research import MarketResearchAgent
+from app.agents.customer_validation_agent import CustomerValidationAgent
 from app.agents.ui_spec import UISpecAgent
 from app.agents.ux_flow import UXFlowAgent
 from app.agents.validation_scoring import ValidationScoringAgent
@@ -17,6 +18,7 @@ from app.models.schemas import IdeaInput
 from app.services.hera_service import get_hera_service
 from app.services.peec_service import get_peec_service
 from app.services.tavily_service import get_tavily_service
+from app.services.storage import get_storage
 
 router = APIRouter()
 logger = logging.getLogger("foundersignal.routes.agents")
@@ -186,3 +188,87 @@ async def get_usage():
         "gemini": "Active",
     }
     return usage
+async def interview_stream_generator(agent, **kwargs):
+    """Custom generator for interview simulation to preserve flat structure."""
+    try:
+        async for payload in agent.run_stream_interviews(**kwargs):
+            # Payload is {"user": ..., "chunk": ..., "is_complete": ...}
+            payload["tokens"] = agent.tokens_used
+            payload["searches"] = agent.searches
+            yield f"data: {json.dumps(payload)}\n\n"
+        
+        # Final completion event
+        yield f"data: {json.dumps({'done': True, 'tokens': agent.tokens_used})}\n\n"
+    except Exception as e:
+        logger.error(f"Interview agent error: {e}", exc_info=True)
+        yield f"data: {json.dumps({'error': str(e)})}\n\n"
+
+
+@router.post("/interviews")
+async def customer_interviews(request: Request):
+    """Run live customer interview simulation with full research context."""
+    body = await request.json()
+    refined_idea_text = body.get("refined_idea", "")
+    market_research_text = body.get("market_research", "")
+    competitor_analysis_text = body.get("competitors", "")
+    ux_flow_text = body.get("ux", "")
+    ui_spec_text = body.get("ui", "")
+    visibility_text = body.get("visibility", "")
+    scoring_text = body.get("scoring", "")
+    
+    from app.models.schemas import RefinedIdea
+    # Reconstruct a basic RefinedIdea for the agent to use as a primary reference
+    mock_idea = RefinedIdea(
+        problem_statement=refined_idea_text[:1000],
+        solution_hypothesis=refined_idea_text,
+        value_proposition="Extracted from concept analysis",
+        target_audience="Specified target group",
+        business_model="Specified business model",
+        key_assumptions=["Implicit in the provided research dossier"],
+        elevator_pitch=refined_idea_text[:500]
+    )
+    
+    agent = CustomerValidationAgent()
+    return StreamingResponse(
+        interview_stream_generator(
+            agent,
+            refined_idea=mock_idea,
+            market_research_text=market_research_text,
+            competitor_analysis_text=competitor_analysis_text,
+            ux_flow_text=ux_flow_text,
+            ui_spec_text=ui_spec_text,
+            visibility_text=visibility_text,
+            scoring_text=scoring_text
+        ),
+        media_type="text/event-stream",
+    )
+@router.get("/sessions")
+async def list_sessions():
+    """List all saved sessions."""
+    return get_storage().list_sessions()
+
+
+@router.get("/sessions/{session_id}")
+async def load_session(session_id: str):
+    """Load a specific session."""
+    session = get_storage().load_session(session_id)
+    if not session:
+        return {"error": "Session not found"}, 404
+    return session
+
+
+@router.post("/sessions/save")
+async def save_session(request: Request):
+    """Save or update a session."""
+    from app.models.schemas import FullReport
+    data = await request.json()
+    report = FullReport.model_validate(data)
+    get_storage().save_session(report)
+    return {"success": True, "id": report.report_id}
+
+
+@router.delete("/sessions/{session_id}")
+async def delete_session(session_id: str):
+    """Delete a session."""
+    success = get_storage().delete_session(session_id)
+    return {"success": success}

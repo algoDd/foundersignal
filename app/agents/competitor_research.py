@@ -90,7 +90,9 @@ class CompetitorResearchAgent(BaseAgent):
 
         if self._tavily:
             # General competitor search
-            idea_summary = refined_idea_text[:500]
+            # Extract a very brief context for searching
+            context_limit = 150
+            idea_summary = refined_idea_text[:context_limit]
             queries = [
                 f"top direct and indirect competitors for {idea_summary}",
                 "competitors alternatives and market landscape",
