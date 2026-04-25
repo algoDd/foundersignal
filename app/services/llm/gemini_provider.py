@@ -110,3 +110,7 @@ class GeminiProvider(BaseLLMProvider):
                     retry_delay *= 2
                     continue
                 raise e
+
+    async def close(self) -> None:
+        """No persistent connection to close for Gemini REST client."""
+        pass
