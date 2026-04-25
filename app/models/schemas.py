@@ -228,6 +228,23 @@ class AIVisibility(BaseModel):
     )
 
 
+class CustomerValidationReport(BaseModel):
+    """Summary of the synthetic customer feedback audit."""
+
+    market_fit_score: int = Field(
+        ge=0, le=100, description="A score from 0-100 indicating market fit."
+    )
+    key_objections: list[str] = Field(
+        description="The most critical objections or 'deal-breakers' raised by the cohort."
+    )
+    surprising_insights: list[str] = Field(
+        description="Unexpected or novel feedback and edge cases identified."
+    )
+    recommended_pivot: str = Field(
+        description="A suggested pivot for the product based on feedback."
+    )
+
+
 class ScoreDimension(BaseModel):
     """A single scoring dimension."""
 
@@ -306,6 +323,7 @@ class FullReport(BaseModel):
     refined_idea: RefinedIdea | None = None
     market_research: MarketResearch | None = None
     competitor_analysis: CompetitorAnalysis | None = None
+    customer_validation: CustomerValidationReport | None = None
     target_audience: TargetAudienceAnalysis | None = None
     ux_flow: UXFlow | None = None
     ui_spec: UISpec | None = None

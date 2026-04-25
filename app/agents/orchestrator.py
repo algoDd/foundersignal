@@ -19,6 +19,7 @@ from datetime import UTC, datetime
 
 from app.agents.ai_visibility import AIVisibilityAgent
 from app.agents.competitor_research import CompetitorResearchAgent
+from app.agents.customer_validation_agent import CustomerValidationAgent
 from app.agents.idea_refinement import IdeaRefinementAgent
 from app.agents.market_research import MarketResearchAgent
 from app.agents.ui_spec import UISpecAgent
@@ -57,6 +58,7 @@ class OrchestratorAgent:
         self._idea_agent = IdeaRefinementAgent()
         self._market_agent = MarketResearchAgent(tavily=tavily)
         self._competitor_agent = CompetitorResearchAgent(tavily=tavily)
+        self._customer_agent = CustomerValidationAgent()
         self._ux_agent = UXFlowAgent()
         self._ui_agent = UISpecAgent()
         self._visibility_agent = AIVisibilityAgent(peec=peec)
@@ -128,11 +130,23 @@ class OrchestratorAgent:
                     logger.error("Competitor research failed: %s", e)
                     return None
 
-            market, competitor = await asyncio.gather(
-                run_market(), run_competitor()
+            async def run_customer_validation():
+                try:
+                    track(f"customer_validation_v{iteration}", AgentStatus.RUNNING)
+                    result = await self._customer_agent.run(refined_idea=refined)
+                    track(f"customer_validation_v{iteration}", AgentStatus.COMPLETED)
+                    return result
+                except Exception as e:
+                    track(f"customer_validation_v{iteration}", AgentStatus.FAILED, str(e))
+                    logger.error("Customer validation failed: %s", e)
+                    return None
+
+            market, competitor, customer_validation = await asyncio.gather(
+                run_market(), run_competitor(), run_customer_validation()
             )
             report.market_research = market
             report.competitor_analysis = competitor
+            report.customer_validation = customer_validation
             report.target_audience = None  # Descoped
 
             # ── Step 3: UX Flow (needs market) ──────────────────
@@ -235,6 +249,7 @@ class OrchestratorAgent:
             self._idea_agent.tokens_used,
             self._market_agent.tokens_used,
             self._competitor_agent.tokens_used,
+            self._customer_agent.tokens_used,
             self._ux_agent.tokens_used,
             self._ui_agent.tokens_used,
             self._visibility_agent.tokens_used,
