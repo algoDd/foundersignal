@@ -205,6 +205,8 @@ Example: ["Early Adopter", "Skeptical Enterprise Buyer", "Budget-Conscious SMB O
         except Exception:
             archetypes = ["Early Adopter", "Skeptical Stakeholder", "Industry Veteran", "Cost-Conscious User", "Practical Implementer", "Visionary Innovator", "Risk-Averse Buyer"]
         
+        interview_responses: list[str] = []
+
         for archetype in archetypes:
             # 2. Generate a persona context
             ctx_prompt = f"""
@@ -274,8 +276,47 @@ Example: ["Early Adopter", "Skeptical Enterprise Buyer", "Budget-Conscious SMB O
                 "response": full_response,
                 "is_complete": True
             }
+            interview_responses.append(
+                f"### {ctx_data.get('name', archetype)} ({archetype})\n{full_response}"
+            )
             # Small delay between interviews for dramatic effect and rate limiting
             await asyncio.sleep(1)
+
+        # 4. Generate synthesis report from all interview responses
+        combined_responses = "\n\n---\n\n".join(interview_responses)
+        report_prompt = f"""
+You are a senior market research analyst. You have just completed {len(archetypes)} in-depth customer interviews for the following product:
+
+{full_research_dossier[:2000]}
+
+Here are the interview transcripts:
+
+{combined_responses[:6000]}
+
+Write a comprehensive synthesis report in Markdown covering:
+1. **Overall Market Signal** — a 0–100 score with a one-line verdict
+2. **Key Themes** — the 3–5 most recurring ideas across interviews
+3. **Critical Objections** — deal-breakers or concerns raised by multiple interviewees
+4. **Surprising Insights** — unexpected findings or edge cases worth exploring
+5. **Archetype Breakdown** — brief summary of each archetype's stance (positive / neutral / negative)
+6. **Recommended Next Steps** — concrete actions the founder should take
+
+Be direct, opinionated, and data-driven. Back every claim with evidence from the transcripts.
+"""
+        report_text = ""
+        async for chunk, _ in self._llm.stream(report_prompt):
+            report_text += chunk
+            yield {
+                "report_chunk": chunk,
+                "is_report": True,
+                "is_complete": False,
+            }
+
+        yield {
+            "report": report_text,
+            "is_report": True,
+            "is_complete": True,
+        }
 
     # --- LangGraph Nodes (Keep for batch runs) ---
 

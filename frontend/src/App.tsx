@@ -291,6 +291,7 @@ export default function App() {
   >({});
   const [isOrchestrating, setIsOrchestrating] = useState(false);
   const [interviews, setInterviews] = useState<any[]>([]);
+  const [interviewReport, setInterviewReport] = useState<string>('');
   const [selectedInterviewIndex, setSelectedInterviewIndex] = useState<
     number | null
   >(null);
@@ -433,6 +434,7 @@ export default function App() {
     if (isSimulating) return;
     setIsSimulating(true);
     setInterviews([]);
+    setInterviewReport('');
     interviewBuffers.current = {};
     try {
       const res = await fetch(
@@ -465,7 +467,9 @@ export default function App() {
         for (const line of lines) {
           if (!line.startsWith("data: ")) continue;
           const d = JSON.parse(line.slice(6));
-          if (d.user) {
+          if (d.is_report) {
+            if (d.report_chunk) setInterviewReport(r => r + d.report_chunk);
+          } else if (d.user) {
             const uname = d.user.context?.name || d.user.name;
             if (d.chunk) {
               interviewBuffers.current[uname] =
@@ -517,6 +521,9 @@ export default function App() {
     setStatus({});
     setTokens({});
     setSearches({});
+    setInterviews([]);
+    setInterviewReport('');
+    setSelectedInterviewIndex(null);
     setAgentTimestamps({});
     setActiveTab("overview");
     setGlobalError(null);
@@ -1033,7 +1040,7 @@ export default function App() {
                         gap: 8,
                       }}
                     >
-                      {interviews.slice(0, TOTAL_INTERVIEWS).map((int, idx) => (
+                      {interviews.slice(0, 5).map((int, idx) => (
                         <div
                           key={idx}
                           className="meeting-card"
@@ -1070,10 +1077,7 @@ export default function App() {
                       {/* Skeleton placeholders up to 5 while streaming */}
                       {isSimulating &&
                         Array.from({
-                          length: Math.max(
-                            0,
-                            TOTAL_INTERVIEWS - interviews.length,
-                          ),
+                          length: Math.max(0, 5 - interviews.length),
                         }).map((_, i) => (
                           <div
                             key={`sk-${i}`}
@@ -1111,14 +1115,13 @@ export default function App() {
                             </div>
                           </div>
                         ))}
-                      {interviews.length > TOTAL_INTERVIEWS && (
+                      {interviews.length > 5 && (
                         <button
                           className="see-all"
                           style={{ textAlign: "left", padding: "4px 0" }}
                           onClick={() => setActiveTab("interviews")}
                         >
-                          +{interviews.length - TOTAL_INTERVIEWS} more
-                          interviews
+                          +{interviews.length - 5} more interviews
                         </button>
                       )}
                     </div>
@@ -1536,7 +1539,8 @@ export default function App() {
 
           {/* ── Interviews tab ── */}
           {activeTab === "interviews" && (
-            <div className="interview-wrap fade-in">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }} className="fade-in">
+            <div className="interview-wrap">
               <div className="interview-list">
                 {/* Real interviews that have arrived */}
                 {interviews.map((int, idx) => (
@@ -1705,6 +1709,54 @@ export default function App() {
                   </div>
                 )}
               </div>
+            </div>
+
+            {/* Synthesis report */}
+            {(interviewReport || isSimulating) && (
+              <div className="content-card">
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+                  <div className="card-title" style={{ fontSize: '0.92rem' }}>
+                    <div className="card-title-icon" style={{ background: 'rgba(70,57,71,0.10)' }}>
+                      <BarChart3 size={14} color="var(--primary)" />
+                    </div>
+                    Interview Synthesis Report
+                    {isSimulating && !interviewReport && (
+                      <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 500, marginLeft: 8 }}>
+                        Generating after interviews complete…
+                      </span>
+                    )}
+                    {isSimulating && interviewReport && (
+                      <div className="spinner" style={{ width: 13, height: 13, marginLeft: 8 }} />
+                    )}
+                  </div>
+                  {interviewReport && (
+                    <button
+                      className="btn-ghost"
+                      style={{ gap: 6 }}
+                      onClick={() => {
+                        const blob = new Blob([interviewReport], { type: 'text/markdown' });
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = 'interview-synthesis.md';
+                        a.click();
+                        URL.revokeObjectURL(url);
+                      }}
+                    >
+                      <Download size={13} /> Download
+                    </button>
+                  )}
+                </div>
+                {interviewReport
+                  ? <div className="markdown-content"><ReactMarkdown>{interviewReport}</ReactMarkdown></div>
+                  : <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      {[80, 60, 70, 50].map((w, i) => (
+                        <div key={i} className="skeleton-line" style={{ width: `${w}%`, height: 12, borderRadius: 4 }} />
+                      ))}
+                    </div>
+                }
+              </div>
+            )}
             </div>
           )}
         </div>
