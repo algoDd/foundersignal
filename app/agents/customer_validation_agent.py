@@ -195,11 +195,12 @@ class CustomerValidationAgent(BaseAgent):
 
             Return ONLY valid JSON with exactly these keys:
             - "name": a realistic first and last name (e.g. "Sarah Chen", "Marcus Rodriguez") — NOT a placeholder
+            - "gender": either "male" or "female"
             - "role": their job title or role
             - "background": 1-2 sentences about their background
             - "values": what they care most about
 
-            Example: {{"name": "Priya Mehta", "role": "Senior Product Manager", "background": "10 years in B2B SaaS, frustrated with manual reporting.", "values": "Efficiency and clear ROI"}}
+            Example: {{"name": "Priya Mehta", "gender": "female", "role": "Senior Product Manager", "background": "10 years in B2B SaaS, frustrated with manual reporting.", "values": "Efficiency and clear ROI"}}
             """
             ctx_res, _ = await self._llm.generate(ctx_prompt, temperature=0.8)
             try:

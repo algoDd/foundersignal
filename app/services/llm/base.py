@@ -121,9 +121,17 @@ def get_llm_provider() -> BaseLLMProvider:
             api_key=settings.gemini_api_key,
             model=settings.llm_model,
         )
+    elif provider_name == "openai":
+        from app.services.llm.openai_provider import OpenAIProvider
+
+        _provider_instance = OpenAIProvider(
+            api_key=settings.openai_api_key,
+            model=settings.llm_model,
+            base_url=settings.openai_base_url,
+        )
     else:
         msg = (
-            f"Unknown LLM provider: '{provider_name}'. Supported: gemini. Set LLM_PROVIDER in .env"
+            f"Unknown LLM provider: '{provider_name}'. Supported: gemini, openai. Set LLM_PROVIDER in .env"
         )
         raise ValueError(msg)
 

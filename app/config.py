@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     log_level: str = "info"
 
     # -------------------------------------------------------------------------
+    # -------------------------------------------------------------------------
     # LLM Provider (agent-agnostic layer)
     # -------------------------------------------------------------------------
     llm_provider: str = "gemini"  # Future: "openai", "anthropic"
@@ -31,12 +32,15 @@ class Settings(BaseSettings):
     # -------------------------------------------------------------------------
     gemini_api_key: str = ""
     tavily_api_key: str = ""
+    openai_api_key: str = ""
+    openai_base_url: str | None = None
 
     # -------------------------------------------------------------------------
     # Partner Integrations (optional — graceful fallback if empty)
     # -------------------------------------------------------------------------
     hera_api_key: str = ""
     peec_api_key: str = ""
+    gradium_api_key: str = ""
 
     # -------------------------------------------------------------------------
     # Helpers

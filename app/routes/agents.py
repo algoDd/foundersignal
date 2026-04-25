@@ -24,6 +24,36 @@ router = APIRouter()
 logger = logging.getLogger("foundersignal.routes.agents")
 
 
+@router.post("/tts")
+async def text_to_speech(request: Request):
+    """Stream TTS audio for an interview response via Gradium."""
+    from app.config import get_settings
+    from app.services.tts_service import stream_tts, voice_for_archetype
+
+    body = await request.json()
+    text = body.get("text", "")
+    archetype = body.get("archetype", "")
+    gender = body.get("gender", "")
+    voice_id = body.get("voice_id") or voice_for_archetype(archetype, gender)
+
+    if not text.strip():
+        return {"error": "No text provided"}
+
+    settings = get_settings()
+    if not settings.gradium_api_key:
+        return {"error": "GRADIUM_API_KEY not configured"}
+
+    async def audio_generator():
+        try:
+            async for chunk in stream_tts(settings.gradium_api_key, voice_id, text):
+                yield chunk
+        except Exception as e:
+            logger.error("TTS stream error: %s", e, exc_info=True)
+
+    from fastapi.responses import StreamingResponse as _SR
+    return _SR(audio_generator(), media_type="audio/wav")
+
+
 async def agent_stream_generator(agent, method_name, **kwargs):
     """Generic generator for agent streaming."""
     try:

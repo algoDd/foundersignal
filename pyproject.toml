@@ -16,6 +16,8 @@ dependencies = [
     "python-multipart>=0.0.9",
     "langgraph",
     "langchain-google-genai",
+    "openai>=2.32.0",
+    "websockets>=13.0",
 ]
 
 [project.optional-dependencies]
