@@ -1,0 +1,1 @@
+"""FounderSignal — Pydantic models."""

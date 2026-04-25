@@ -1,0 +1,1 @@
+"""FounderSignal — Agent framework."""

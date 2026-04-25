@@ -1,0 +1,1 @@
+"""FounderSignal — External service integrations."""

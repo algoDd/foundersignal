@@ -1,0 +1,42 @@
+I am building a product for founders founder signal its job is to do following things and this is for winning the hackathon so focus on using hackathon technologies and explicitly list in a md what do you need for integrations. For now we make server api and use Lovable to make the ui for local If that is possible and connect to the api
+
+User enter: -> User should be able to write or talk to the platform
+Product idea
+OptionalTarget region
+Optional Industry
+Optional target audience
+Optional business model
+
+
+A user enters a 
+raw startup idea, and the product 
+generates
+
+- Problem statement
+- Target audience
+- Product flow
+- Feature recommendations
+- UI flow and designs
+- UI design spec
+- Market research using Tavily
+- Competitor analysis
+- AI search visibility PeecAI checks how the idea might appear in AI search
+- Validation Dashboard and infographics using Hera to make the nice dahsboard seeing how well the idea is perceived the competitors the market etc
+
+Make one agent with tools and skills doing below or make multiple agents for each design it your self and document the ARD why and what you did:
+Idea Refinement
+Market Research
+Competitor Research
+Target Audience
+Behavioral Research
+UX Flow Agent
+UI Spec Agent
+Validation Scoring
+Source Verification
+
+Thinking of using but you decide:
+Qontext: context/memory layer
+Peec AI and Tavily: AI search visibility analysis and market research and trend analysis
+Lovable: export prompt to generate landing page and build UI
+Hera: motion storyboard / pitch visuals dashboarding video generation for quick check how things will look like
+Gradium/telli/ai-coustics: which ever is best to listen to the user and iterate over th idea
