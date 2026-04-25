@@ -37,11 +37,17 @@ class SyntheticUser(BaseModel):
         return f"{self.name} | {ctx_str} | OCEAN: {self.ocean.model_dump()}"
 
 
+class InterviewResult(TypedDict):
+    customer_info: Dict[str, Any] 
+    response: str
+
+
 class State(TypedDict):
     product_idea: str
     target_variables: List[str]
     archetypes: List[str]
     cohort: List[SyntheticUser]
+    interview_results: List[InterviewResult]
     raw_feedbacks: Annotated[List[str], lambda x, y: x + y]  # Appends list items
     final_audit: str
 
@@ -215,7 +221,7 @@ async def simulation_node(state: State):
     """Simulates parallel interviews with the cohort."""
     print(f"[*] Running {len(state['cohort'])} interviews in parallel...")
 
-    async def interview(user: SyntheticUser):
+    async def interview(user: SyntheticUser) -> InterviewResult:
         print(f"  -> Starting interview with {user.name}...")
         # The 'Adversarial' Prompting
         system = f"""
@@ -229,11 +235,16 @@ async def simulation_node(state: State):
             [SystemMessage(content=system), HumanMessage(content=msg)]
         )
         print(f"     Finished interview with {user.name}.")
-        return f"--- {user.name} ---\n{res.content}"
+        return {"customer_info": user.model_dump(), "response": res.content}
 
     tasks = [interview(u) for u in state["cohort"]]
-    feedbacks = await asyncio.gather(*tasks)
-    return {"raw_feedbacks": feedbacks}
+    interview_results = await asyncio.gather(*tasks)
+    raw_feedbacks = [
+        f"--- {result['customer_info']['name']} ---\n{result['response']}"
+        for result in interview_results
+    ]
+
+    return {"interview_results": interview_results, "raw_feedbacks": raw_feedbacks}
 
 
 def audit_node(state: State):
@@ -274,6 +285,20 @@ def audit_node(state: State):
     return {"final_audit": res.content}
 
 
+def save_interviews_node(state: State):
+    """Saves all interview results to a single JSON file."""
+    print("[*] Saving all interview results to a single file...")
+    os.makedirs("interviews", exist_ok=True)
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    file_path = os.path.join("interviews", f"interviews_{timestamp}.json")
+
+    with open(file_path, "w") as f:
+        json.dump(state["interview_results"], f, indent=2)
+
+    print(f"[*] All {len(state['interview_results'])} interviews saved to {file_path}")
+    return {}
+
+
 # --- 3. THE GRAPH ---
 
 builder = StateGraph(State)
@@ -282,6 +307,7 @@ builder.add_node("persona_strategist", persona_strategist_node)
 builder.add_node("factory", persona_factory_node)
 builder.add_node("save_personas", save_personas_node)
 builder.add_node("simulate", simulation_node)
+builder.add_node("save_interviews", save_interviews_node)
 builder.add_node("audit", audit_node)
 
 builder.add_edge(START, "strategist")
@@ -289,7 +315,8 @@ builder.add_edge("strategist", "persona_strategist")
 builder.add_edge("persona_strategist", "factory")
 builder.add_edge("factory", "save_personas")
 builder.add_edge("save_personas", "simulate")
-builder.add_edge("simulate", "audit")
+builder.add_edge("simulate", "save_interviews")
+builder.add_edge("save_interviews", "audit")
 builder.add_edge("audit", END)
 
 app = builder.compile()
@@ -333,10 +360,17 @@ async def audit_endpoint(
         )
 
     result = await run_audit(idea_text, total_customers)
+
+    customer_info_with_responses = []
+    for interview in result.get("interview_results", []):
+        customer_info = interview.get("customer_info", {})
+        customer_info["interview_response"] = interview.get("response", "")
+        customer_info_with_responses.append(customer_info)
+
     return {
         "status": "success",
-        "message": "Audit completed. Check the 'reports' and 'outputs' directories for the outputs.",
-        "audit_summary": result["final_audit"],
+        "report": result["final_audit"],
+        "customer_info": customer_info_with_responses,
     }
 
 
