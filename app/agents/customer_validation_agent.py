@@ -189,11 +189,17 @@ class CustomerValidationAgent(BaseAgent):
             Create a unique person profile for a user interview.
             This persona MUST embody the archetype: '{archetype}'.
             Focus on their role, pain points, and what they value in a solution.
-            
+
             Based on this Product Dossier:
             {full_research_dossier[:4000]}
-            
-            Return ONLY valid JSON with keys: name, role, background, values.
+
+            Return ONLY valid JSON with exactly these keys:
+            - "name": a realistic first and last name (e.g. "Sarah Chen", "Marcus Rodriguez") — NOT a placeholder
+            - "role": their job title or role
+            - "background": 1-2 sentences about their background
+            - "values": what they care most about
+
+            Example: {{"name": "Priya Mehta", "role": "Senior Product Manager", "background": "10 years in B2B SaaS, frustrated with manual reporting.", "values": "Efficiency and clear ROI"}}
             """
             ctx_res, _ = await self._llm.generate(ctx_prompt, temperature=0.8)
             try:
@@ -203,10 +209,13 @@ class CustomerValidationAgent(BaseAgent):
                     clean_json = clean_json.split("```json")[1].split("```")[0].strip()
                 elif "```" in clean_json:
                     clean_json = clean_json.split("```")[1].strip()
-                
+
                 ctx_data = json.loads(clean_json)
+                # Ensure name field is present and meaningful
+                if not ctx_data.get("name") or ctx_data["name"].startswith("User_"):
+                    ctx_data["name"] = ctx_data.get("full_name") or ctx_data.get("persona_name") or f"{archetype} Respondent"
             except Exception:
-                ctx_data = {"name": f"User_{archetype.replace(' ', '_')}", "role": archetype, "background": "Unknown", "values": "Efficiency"}
+                ctx_data = {"name": f"{archetype} Respondent", "role": archetype, "background": "Unknown", "values": "Efficiency"}
 
             user = SyntheticUser(
                 name=ctx_data.get("name", "User"),

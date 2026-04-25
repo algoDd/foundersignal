@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Activity, Sparkles, Target, Zap, CheckCircle2, Cpu, BarChart3, Layout, Layers, Globe, Search, ArrowRight, Clock, Trash2, ChevronLeft, ChevronRight, Save } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 
@@ -13,6 +13,59 @@ const AGENTS = [
   { id: 'scoring', label: 'Validation Score', icon: BarChart3, endpoint: '/scoring' },
 ];
 
+function IdeaPromptBar({ idea, isOrchestrating, onIdeaChange, onRerun }: {
+  idea: string;
+  isOrchestrating: boolean;
+  onIdeaChange: (v: string) => void;
+  onRerun: () => void;
+}) {
+  const [committed, setCommitted] = useState(idea);
+  const [focused, setFocused] = useState(false);
+  const changed = idea !== committed;
+
+  const handleRerun = () => {
+    setCommitted(idea);
+    onRerun();
+  };
+
+  return (
+    <div style={{
+      display: 'flex', gap: '12px', alignItems: 'flex-start', marginBottom: '32px',
+      background: 'white', borderRadius: '16px', padding: '14px 18px',
+      border: `1px solid ${focused ? 'var(--primary)' : changed ? '#f59e0b' : 'var(--glass-border)'}`,
+      boxShadow: focused ? '0 0 0 3px var(--accent-glow)' : 'var(--shadow-sm)',
+      transition: 'border-color 0.2s, box-shadow 0.2s',
+    }}>
+      <div style={{ flex: 1, position: 'relative' }}>
+        <div style={{ fontSize: '0.7rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: focused || changed ? 'var(--primary)' : 'var(--text-secondary)', marginBottom: '6px', transition: 'color 0.2s' }}>
+          Your Idea
+        </div>
+        <textarea
+          value={idea}
+          onChange={(e) => onIdeaChange(e.target.value)}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
+          rows={2}
+          style={{
+            width: '100%', resize: 'none', fontSize: '0.95rem', lineHeight: '1.5',
+            border: 'none', outline: 'none', background: 'transparent',
+            color: 'var(--text-primary)', fontFamily: 'inherit',
+          }}
+        />
+      </div>
+      <button
+        className="btn-primary"
+        onClick={handleRerun}
+        disabled={isOrchestrating || !idea.trim() || !changed}
+        style={{ whiteSpace: 'nowrap', flexShrink: 0, alignSelf: 'center', opacity: !changed ? 0.4 : 1, transition: 'opacity 0.2s' }}
+      >
+        {isOrchestrating ? <div className="spinner" style={{ width: '16px', height: '16px' }}></div> : <ArrowRight size={16} />}
+        {isOrchestrating ? 'Running...' : 'Modify'}
+      </button>
+    </div>
+  );
+}
+
 function App() {
   const [idea, setIdea] = useState('');
   const [results, setResults] = useState<Record<string, string>>({});
@@ -25,11 +78,12 @@ function App() {
   const [interviews, setInterviews] = useState<any[]>([]);
   const [selectedInterviewIndex, setSelectedInterviewIndex] = useState<number | null>(null);
   const [isSimulating, setIsSimulating] = useState(false);
+  const interviewBuffers = useRef<Record<string, string>>({});
   const [globalError, setGlobalError] = useState<string | null>(null);
   const [sessions, setSessions] = useState<any[]>([]);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
-  
+
   const totalTokens = Object.values(tokens).reduce((acc, val) => acc + val, 0);
   const totalSearches = Object.values(searches).reduce((acc, val) => acc + (val?.length || 0), 0);
 
@@ -52,28 +106,28 @@ function App() {
     try {
       const res = await fetch(`http://localhost:8000/api/v1/agents/sessions/${sessionId}`);
       const data = await res.json();
-      
+
       // Hydrate state
       setIdea(data.input.idea);
       setCurrentSessionId(data.report_id);
-      
+
       const newResults: any = {};
       const newStatus: any = {};
       const newTokens: any = {};
       const newSearches: any = {};
-      
+
       // Map back from schemas
       if (data.refined_idea) {
         newResults.refine = results['refine']; // Special handling for Markdown format
         newStatus.refine = 'completed';
       }
-      
+
       // Simple hydration for most fields
-      setResults(data.results_map || {}); 
+      setResults(data.results_map || {});
       setStatus(data.status_map || {});
       setTokens(data.tokens_map || {});
       setSearches(data.searches_map || {});
-      
+
       setActiveTab('overview');
       setIsSidebarOpen(false);
     } catch (e) {
@@ -93,13 +147,13 @@ function App() {
         searches_map: finalSearches,
         created_at: new Date().toISOString()
       };
-      
+
       await fetch('http://localhost:8000/api/v1/agents/sessions/save', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
-      
+
       setCurrentSessionId(reportId);
       fetchSessions();
     } catch (e) {
@@ -149,7 +203,7 @@ function App() {
         for (const line of lines) {
           if (line.startsWith('data: ')) {
             try {
-              const data = JSON.parse(line.replace('data: ', ''));
+              const data = JSON.parse(line.slice(6));
               if (data.chunk) {
                 fullContent += data.chunk;
                 setResults(prev => ({ ...prev, [agentId]: fullContent }));
@@ -188,13 +242,14 @@ function App() {
     if (isSimulating) return;
     setIsSimulating(true);
     setInterviews([]);
+    interviewBuffers.current = {};
     setActiveTab('interviews');
 
     try {
       const response = await fetch('http://localhost:8000/api/v1/agents/interviews', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
+        body: JSON.stringify({
           refined_idea: results['refine'],
           market_research: results['market'],
           competitors: results['competitors'],
@@ -223,21 +278,37 @@ function App() {
 
         for (const line of lines) {
           if (line.startsWith('data: ')) {
-            const data = JSON.parse(line.replace('data: ', ''));
-            
+            const data = JSON.parse(line.slice(6));
+
             if (data.user) {
-              setInterviews(prev => {
-                const existing = prev.findIndex(i => i.user.name === data.user.name);
-                if (existing >= 0) {
-                  const updated = [...prev];
-                  if (data.chunk) updated[existing].response += data.chunk;
-                  if (data.is_complete) updated[existing].is_complete = true;
-                  return updated;
-                } else {
-                  if (prev.length === 0) setSelectedInterviewIndex(0);
-                  return [...prev, { user: data.user, response: data.chunk || '', is_complete: false }];
-                }
-              });
+              const userName = data.user.context?.name || data.user.name;
+              if (data.chunk) {
+                // Accumulate in ref (immune to StrictMode double-invocation)
+                interviewBuffers.current[userName] = (interviewBuffers.current[userName] || '') + data.chunk;
+                const accumulated = interviewBuffers.current[userName];
+                setInterviews(prev => {
+                  const existing = prev.findIndex(i => (i.user.context?.name || i.user.name) === userName);
+                  if (existing >= 0) {
+                    const updated = [...prev];
+                    updated[existing] = { ...updated[existing], response: accumulated };
+                    return updated;
+                  } else {
+                    if (prev.length === 0) setSelectedInterviewIndex(0);
+                    return [...prev, { user: data.user, response: accumulated, is_complete: false }];
+                  }
+                });
+              }
+              if (data.is_complete) {
+                setInterviews(prev => {
+                  const existing = prev.findIndex(i => (i.user.context?.name || i.user.name) === userName);
+                  if (existing >= 0) {
+                    const updated = [...prev];
+                    updated[existing] = { ...updated[existing], is_complete: true };
+                    return updated;
+                  }
+                  return prev;
+                });
+              }
             }
           }
         }
@@ -253,18 +324,18 @@ function App() {
   const startAnalysis = async () => {
     if (isOrchestrating) return;
     if (!idea.trim()) return;
-    
+
     setIsOrchestrating(true);
     setResults({});
     setStatus({});
     setTokens({});
     setSearches({});
     setGlobalError(null);
-    
+
     try {
       // 1. Refine (The Main Stage)
       const refinedText = await streamAgent('refine', { idea });
-      
+
       await new Promise(r => setTimeout(r, 500));
 
       // 2. Market & Competitors (Parallel - Burst of 2)
@@ -272,7 +343,7 @@ function App() {
         streamAgent('market', { refined_idea: refinedText }),
         streamAgent('competitors', { refined_idea: refinedText })
       ]);
-      
+
       // 3. UX & Scoring (Parallel - Burst of 2)
       // These are heavy logic steps
       const [uxText] = await Promise.all([
@@ -285,11 +356,11 @@ function App() {
       // 4. Visibility (Sequential)
       // Separated to avoid hitting concurrent limits
       await streamAgent('visibility', { refined_idea: refinedText, competitor_research: compText });
-      
+
       // 5. UI (Depends on UX)
       await streamAgent('ui', { refined_idea: refinedText, ux_flow: uxText });
 
-      await fetchUsage();
+      // await fetchUsage();
       await saveCurrentSession(results, status, tokens, searches);
     } catch (err: any) {
       console.error('Orchestration stopped due to stage failure:', err);
@@ -299,13 +370,13 @@ function App() {
     }
   };
 
-  const isOverviewAvailable = status['refine'] === 'completed' && (status['market'] === 'completed' || status['competitors'] === 'completed');  return (
+  const isOverviewAvailable = status['refine'] === 'completed' && (status['market'] === 'completed' || status['competitors'] === 'completed'); return (
     <div style={{ display: 'flex', height: '100vh', width: '100vw', overflow: 'hidden' }}>
       {/* Session History Sidebar */}
-      <div 
-        style={{ 
-          width: isSidebarOpen ? '320px' : '0px', 
-          background: 'white', 
+      <div
+        style={{
+          width: isSidebarOpen ? '320px' : '0px',
+          background: 'white',
           borderRight: isSidebarOpen ? '1px solid #f1f5f9' : 'none',
           transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
           position: 'relative',
@@ -315,52 +386,52 @@ function App() {
         }}
       >
         <div style={{ padding: '24px', borderBottom: '1px solid #f1f5f9', opacity: isSidebarOpen ? 1 : 0 }}>
-           <h3 style={{ margin: 0, fontSize: '1.1rem' }}>Project History</h3>
+          <h3 style={{ margin: 0, fontSize: '1.1rem' }}>Project History</h3>
         </div>
-        
+
         <div style={{ flex: 1, overflowY: 'auto', padding: '12px', opacity: isSidebarOpen ? 1 : 0 }}>
-           {sessions.length === 0 ? (
-             <div style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--text-secondary)' }}>
-                <Clock size={32} style={{ margin: '0 auto 16px', opacity: 0.3 }} />
-                <p style={{ fontSize: '0.85rem' }}>Your history is empty.</p>
-             </div>
-           ) : (
-             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                {sessions.map(s => (
-                  <div 
-                    key={s.id} 
-                    onClick={() => loadSession(s.id)}
-                    style={{ 
-                      padding: '16px', 
-                      borderRadius: '12px', 
-                      background: currentSessionId === s.id ? 'var(--accent-glow)' : '#f8fafc',
-                      cursor: 'pointer',
-                      border: `1px solid ${currentSessionId === s.id ? 'var(--accent)' : 'transparent'}`,
-                      transition: 'all 0.2s'
-                    }}
-                  >
-                    <div style={{ fontWeight: 600, fontSize: '0.85rem', marginBottom: '4px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                       {s.idea}
-                    </div>
-                    <div className="flex-between">
-                       <span style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>
-                         {new Date(s.created_at).toLocaleDateString()}
-                       </span>
-                       {s.score && <span className="badge success">{s.score}</span>}
-                    </div>
+          {sessions.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--text-secondary)' }}>
+              <Clock size={32} style={{ margin: '0 auto 16px', opacity: 0.3 }} />
+              <p style={{ fontSize: '0.85rem' }}>Your history is empty.</p>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              {sessions.map(s => (
+                <div
+                  key={s.id}
+                  onClick={() => loadSession(s.id)}
+                  style={{
+                    padding: '16px',
+                    borderRadius: '12px',
+                    background: currentSessionId === s.id ? 'var(--accent-glow)' : '#f8fafc',
+                    cursor: 'pointer',
+                    border: `1px solid ${currentSessionId === s.id ? 'var(--accent)' : 'transparent'}`,
+                    transition: 'all 0.2s'
+                  }}
+                >
+                  <div style={{ fontWeight: 600, fontSize: '0.85rem', marginBottom: '4px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {s.idea}
                   </div>
-                ))}
-             </div>
-           )}
+                  <div className="flex-between">
+                    <span style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>
+                      {new Date(s.created_at).toLocaleDateString()}
+                    </span>
+                    {s.score && <span className="badge success">{s.score}</span>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Sidebar Toggle Handle */}
-        <div 
+        <div
           onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-          style={{ 
-            position: 'absolute', 
-            right: '-32px', 
-            top: '50%', 
+          style={{
+            position: 'absolute',
+            right: '-32px',
+            top: '50%',
             transform: 'translateY(-50%)',
             background: 'white',
             width: '32px',
@@ -381,18 +452,18 @@ function App() {
 
       {/* Main Content Area */}
       <div style={{ flex: 1, overflowY: 'auto', background: '#f8fafc', position: 'relative' }}>
-        
+
         {/* Global Error Banner */}
         {globalError && (
           <div className="error-box fade-in" style={{ margin: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', position: 'sticky', top: '16px', zIndex: 100 }}>
-             <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                <Activity size={24} color="var(--danger)" />
-                <div>
-                   <h3 style={{ margin: 0, fontSize: '0.9rem' }}>Analysis Interrupted</h3>
-                   <p style={{ margin: 0, fontSize: '0.8rem' }}>{globalError}</p>
-                </div>
-             </div>
-             <button className="btn-small" onClick={() => setGlobalError(null)}>Dismiss</button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <Activity size={24} color="var(--danger)" />
+              <div>
+                <h3 style={{ margin: 0, fontSize: '0.9rem' }}>Analysis Interrupted</h3>
+                <p style={{ margin: 0, fontSize: '0.8rem' }}>{globalError}</p>
+              </div>
+            </div>
+            <button className="btn-small" onClick={() => setGlobalError(null)}>Dismiss</button>
           </div>
         )}
 
@@ -410,14 +481,14 @@ function App() {
               </p>
 
               <div className="glass-panel" style={{ padding: '40px' }}>
-                <textarea 
+                <textarea
                   value={idea}
                   onChange={(e) => setIdea(e.target.value)}
                   placeholder="Paste your raw startup idea here..."
                   style={{ width: '100%', height: '150px', marginBottom: '24px', fontSize: '1.1rem' }}
                 />
-                <button 
-                  className="btn-primary" 
+                <button
+                  className="btn-primary"
                   onClick={startAnalysis}
                   disabled={isOrchestrating || !idea.trim()}
                   style={{ width: '100%', padding: '16px', fontSize: '1.1rem' }}
@@ -431,7 +502,7 @@ function App() {
         ) : (
           <div style={{ padding: '40px', maxWidth: '1400px', margin: '0 auto' }}>
             {/* Header / Stats */}
-            <header className="flex-between" style={{ marginBottom: '40px' }}>
+            <header className="flex-between" style={{ marginBottom: '24px' }}>
               <div>
                 <h1 className="text-gradient" style={{ margin: 0 }}>FounderSignal</h1>
                 <p style={{ margin: 0, fontSize: '0.9rem', color: 'var(--text-secondary)' }}>Live Validation Engine</p>
@@ -442,51 +513,70 @@ function App() {
               </div>
             </header>
 
-            {/* Agent Progress Tiles */}
-            <div className="dashboard-tiles" style={{ marginBottom: '40px' }}>
-              {AGENTS.map((agent) => {
-                const s = status[agent.id] || 'pending';
-                const Icon = agent.icon;
-                return (
-                  <div 
-                    key={agent.id} 
-                    className={`dashboard-tile ${activeTab === agent.id ? 'active' : ''} ${s === 'completed' ? 'clickable' : ''}`}
-                    onClick={() => (s === 'completed' || s === 'running') && setActiveTab(agent.id)}
-                    style={{ cursor: (s === 'completed' || s === 'running') ? 'pointer' : 'default' }}
-                  >
-                    <div className={`tile-icon ${s === 'running' ? 'running' : s === 'completed' ? 'done' : ''}`}>
-                      {s === 'completed' ? <CheckCircle2 size={16} /> : <Icon size={16} />}
-                    </div>
-                    <div style={{ textAlign: 'left' }}>
-                      <h4 style={{ fontSize: '0.8rem', margin: 0 }}>{agent.label}</h4>
-                      <p style={{ fontSize: '0.65rem', margin: 0, textTransform: 'uppercase', color: 'var(--text-secondary)' }}>{s}</p>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+            {/* Idea prompt bar */}
+            <IdeaPromptBar
+              idea={idea}
+              isOrchestrating={isOrchestrating}
+              onIdeaChange={setIdea}
+              onRerun={startAnalysis}
+            />
 
             <div style={{ display: 'flex', gap: '32px' }}>
-              {/* Tabs Navigation */}
-              <div style={{ width: '240px', flexShrink: 0 }}>
-                <div className="glass-panel" style={{ padding: '20px', position: 'sticky', top: '40px' }}>
-                  <h3 style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', textTransform: 'uppercase', marginBottom: '16px' }}>Dashboard</h3>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                    <button onClick={() => setActiveTab('overview')} className={`nav-item ${activeTab === 'overview' ? 'active' : ''}`}>
-                      <Layers size={16} /> Overview
-                    </button>
-                    {AGENTS.map(a => status[a.id] && (
-                      <button key={a.id} onClick={() => setActiveTab(a.id)} className={`nav-item ${activeTab === a.id ? 'active' : ''}`}>
-                        <a.icon size={16} /> {a.label}
-                      </button>
-                    ))}
-                    <button 
-                      onClick={() => setActiveTab('interviews')} 
-                      className={`nav-item ${activeTab === 'interviews' ? 'active' : ''} ${interviews.length === 0 ? 'pending' : ''}`}
-                      disabled={interviews.length === 0 && !isSimulating}
-                    >
-                      <Activity size={16} /> Interviews
-                    </button>
+              {/* Left column — agent tiles (vertical) */}
+              <div style={{ width: '220px', flexShrink: 0 }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', position: 'sticky', top: '40px' }}>
+                  {/* Overview tile */}
+                  <div
+                    className={`dashboard-tile ${activeTab === 'overview' ? 'active' : ''} clickable`}
+                    onClick={() => setActiveTab('overview')}
+                    style={{ cursor: 'pointer' }}
+                  >
+                    <div className={`tile-icon ${activeTab === 'overview' ? 'done' : ''}`}>
+                      <Layers size={16} />
+                    </div>
+                    <div style={{ textAlign: 'left' }}>
+                      <h4 style={{ fontSize: '0.8rem', margin: 0 }}>Overview</h4>
+                      <p style={{ fontSize: '0.65rem', margin: 0, textTransform: 'uppercase', color: 'var(--text-secondary)' }}>summary</p>
+                    </div>
+                  </div>
+
+                  {/* Agent tiles */}
+                  {AGENTS.map((agent) => {
+                    const s = status[agent.id] || 'pending';
+                    const Icon = agent.icon;
+                    return (
+                      <div
+                        key={agent.id}
+                        className={`dashboard-tile ${activeTab === agent.id ? 'active' : ''} ${s === 'completed' || s === 'running' ? 'clickable' : ''}`}
+                        onClick={() => (s === 'completed' || s === 'running') && setActiveTab(agent.id)}
+                        style={{ cursor: (s === 'completed' || s === 'running') ? 'pointer' : 'default' }}
+                      >
+                        <div className={`tile-icon ${s === 'running' ? 'running' : s === 'completed' ? 'done' : ''}`}>
+                          {s === 'completed' ? <CheckCircle2 size={16} /> : <Icon size={16} />}
+                        </div>
+                        <div style={{ textAlign: 'left' }}>
+                          <h4 style={{ fontSize: '0.8rem', margin: 0 }}>{agent.label}</h4>
+                          <p style={{ fontSize: '0.65rem', margin: 0, textTransform: 'uppercase', color: 'var(--text-secondary)' }}>{s}</p>
+                        </div>
+                      </div>
+                    );
+                  })}
+
+                  {/* Interviews tile */}
+                  <div
+                    className={`dashboard-tile ${activeTab === 'interviews' ? 'active' : ''} ${interviews.length > 0 || isSimulating ? 'clickable' : ''}`}
+                    onClick={() => (interviews.length > 0 || isSimulating) && setActiveTab('interviews')}
+                    style={{ cursor: (interviews.length > 0 || isSimulating) ? 'pointer' : 'default', opacity: interviews.length === 0 && !isSimulating ? 0.45 : 1 }}
+                  >
+                    <div className={`tile-icon ${isSimulating ? 'running' : interviews.length > 0 ? 'done' : ''}`}>
+                      <Activity size={16} />
+                    </div>
+                    <div style={{ textAlign: 'left' }}>
+                      <h4 style={{ fontSize: '0.8rem', margin: 0 }}>Interviews</h4>
+                      <p style={{ fontSize: '0.65rem', margin: 0, textTransform: 'uppercase', color: 'var(--text-secondary)' }}>
+                        {isSimulating ? 'running' : interviews.length > 0 ? 'completed' : 'pending'}
+                      </p>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -496,63 +586,78 @@ function App() {
                 <div className="glass-panel" style={{ padding: '32px', minHeight: '600px' }}>
                   {activeTab === 'overview' ? (
                     <div className="fade-in">
-                       <h2 style={{ marginBottom: '24px' }}>Executive Summary</h2>
-                       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px' }}>
-                          {results['refine'] && (
-                            <div className="glass-panel" style={{ gridColumn: 'span 2', background: 'white' }}>
-                              <h3 style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
-                                <Sparkles size={18} color="var(--accent)" /> Vision
-                              </h3>
-                              <ReactMarkdown>{results['refine'].split('##')[1]?.slice(0, 500) || results['refine'].slice(0, 200)}</ReactMarkdown>
-                            </div>
-                          )}
-                          {results['scoring'] && (
-                            <div className="glass-panel" style={{ background: 'var(--accent-glow)', border: '1px solid var(--accent)' }}>
-                               <h3>Verdict</h3>
-                               <ReactMarkdown>{results['scoring'].split('## OVERALL VALIDATION SCORE')[1]?.split('##')[0] || 'Pending'}</ReactMarkdown>
-                            </div>
-                          )}
-                       </div>
-                       
-                       <div style={{ marginTop: '40px', padding: '32px', textAlign: 'center', borderTop: '1px solid #f1f5f9' }}>
-                          <h3 style={{ marginBottom: '12px' }}>Simulate User Feedback</h3>
-                          <button 
-                            className="btn-primary" 
-                            onClick={startInterviews}
-                            disabled={isSimulating}
-                            style={{ margin: '0 auto' }}
-                          >
-                            {isSimulating ? <div className="spinner"></div> : <Activity size={20} />}
-                            {isSimulating ? 'Generating...' : 'Simulate 5 Interviews'}
-                          </button>
-                       </div>
+                      <h2 style={{ marginBottom: '24px' }}>Executive Summary</h2>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px' }}>
+                        {results['refine'] && (
+                          <div className="glass-panel" style={{ gridColumn: 'span 2', background: 'white' }}>
+                            <h3 style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
+                              <Sparkles size={18} color="var(--accent)" /> Vision
+                            </h3>
+                            <ReactMarkdown>{results['refine'].split('##')[1]?.slice(0, 500) || results['refine'].slice(0, 200)}</ReactMarkdown>
+                          </div>
+                        )}
+                        {results['scoring'] && (
+                          <div className="glass-panel" style={{ background: 'var(--accent-glow)', border: '1px solid var(--accent)' }}>
+                            <h3>Verdict</h3>
+                            <ReactMarkdown>{results['scoring'].split('## OVERALL VALIDATION SCORE')[1]?.split('##')[0] || 'Pending'}</ReactMarkdown>
+                          </div>
+                        )}
+                      </div>
+
+                      <div style={{ marginTop: '40px', padding: '32px', textAlign: 'center', borderTop: '1px solid #f1f5f9' }}>
+                        <h3 style={{ marginBottom: '12px' }}>Simulate User Feedback</h3>
+                        <button
+                          className="btn-primary"
+                          onClick={startInterviews}
+                          disabled={isSimulating}
+                          style={{ margin: '0 auto' }}
+                        >
+                          {isSimulating ? <div className="spinner"></div> : <Activity size={20} />}
+                          {isSimulating ? 'Generating...' : 'Simulate 5 Interviews'}
+                        </button>
+                      </div>
                     </div>
                   ) : activeTab === 'interviews' ? (
                     <div className="fade-in" style={{ display: 'flex', gap: '24px' }}>
-                       <div style={{ width: '250px', borderRight: '1px solid #f1f5f9' }}>
-                          {interviews.map((int, idx) => (
-                            <div 
-                              key={idx} 
-                              onClick={() => setSelectedInterviewIndex(idx)}
-                              style={{ padding: '12px', borderRadius: '8px', cursor: 'pointer', background: selectedInterviewIndex === idx ? '#f1f5f9' : 'transparent' }}
-                            >
-                              <div style={{ fontWeight: 600 }}>{int.user.context.name}</div>
-                              <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>{int.user.archetype}</div>
+                      <div style={{ width: '250px', borderRight: '1px solid #f1f5f9' }}>
+                        {interviews.map((int, idx) => (
+                          <div
+                            key={idx}
+                            onClick={() => setSelectedInterviewIndex(idx)}
+                            style={{ padding: '12px', borderRadius: '8px', cursor: 'pointer', background: selectedInterviewIndex === idx ? '#f1f5f9' : 'transparent' }}
+                          >
+                            <div style={{ fontWeight: 600 }}>{int.user.context.name}</div>
+                            <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>{int.user.archetype}</div>
+                          </div>
+                        ))}
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        {selectedInterviewIndex !== null && interviews[selectedInterviewIndex] ? (
+                          <div>
+                            <h2>{interviews[selectedInterviewIndex].user.context.name}</h2>
+                            <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '16px' }}>
+                              {interviews[selectedInterviewIndex].user.archetype} · {interviews[selectedInterviewIndex].user.context.role}
                             </div>
-                          ))}
-                       </div>
-                       <div style={{ flex: 1 }}>
-                          {selectedInterviewIndex !== null && interviews[selectedInterviewIndex] ? (
-                            <div>
-                               <h2>{interviews[selectedInterviewIndex].user.context.name}</h2>
-                               <ReactMarkdown>{interviews[selectedInterviewIndex].response}</ReactMarkdown>
-                            </div>
-                          ) : <p>Select an interview to view feedback</p>}
-                       </div>
+                            {interviews[selectedInterviewIndex].response ? (
+                              <ReactMarkdown>{interviews[selectedInterviewIndex].response}</ReactMarkdown>
+                            ) : (
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', color: 'var(--text-secondary)', marginTop: '24px' }}>
+                                <div className="spinner" style={{ width: '16px', height: '16px', flexShrink: 0 }}></div>
+                                <span>Interview in progress...</span>
+                              </div>
+                            )}
+                          </div>
+                        ) : isSimulating ? (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', color: 'var(--text-secondary)', marginTop: '24px' }}>
+                            <div className="spinner" style={{ width: '16px', height: '16px', flexShrink: 0 }}></div>
+                            <span>Preparing interviews...</span>
+                          </div>
+                        ) : <p>Select an interview to view feedback</p>}
+                      </div>
                     </div>
                   ) : (
                     <div className="markdown-content">
-                       <ReactMarkdown>{results[activeTab] || ''}</ReactMarkdown>
+                      <ReactMarkdown>{results[activeTab] || ''}</ReactMarkdown>
                     </div>
                   )}
                 </div>
