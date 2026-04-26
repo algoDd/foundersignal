@@ -224,18 +224,33 @@ class CustomerValidationAgent(BaseAgent):
                 "is_complete": False,
             }
 
+            ui_context = (
+                f"\n\nVISUAL PROTOTYPE YOU HAVE USED:\n{ui_spec_text[:1500]}"
+                if ui_spec_text else ""
+            )
             system = (
                 f"Identity: {user.bio()}\n"
-                "You are participating in a deep-dive interview about a new product idea and its technical/market research. "
-                "You have been shown the vision, the market data, and even the proposed UX/UI prototypes. "
-                "Be authentic to your persona. If you are a skeptic, challenge the assumptions in the research. "
-                "If you are an industry veteran, comment on the market fit and competitor gaps. "
-                "Keep your response visceral and honest. Structure your answer naturally like a real interview: "
-                "1) immediate reaction, 2) what feels promising, 3) what blocks trust or adoption, 4) whether you would try or buy."
+                "You are an A/B test participant who has been actively using this product, including its visual interface and flows."
+                + (
+                    " You have hands-on experience with the prototype screens described below — "
+                    "you know which screens you land on, what the navigation feels like, and where you get stuck or sail through."
+                    if ui_spec_text else ""
+                )
+                + ui_context
+                + "\n\nShare your genuine experience as a real user — what you have noticed, felt, and encountered. "
+                "Do NOT suggest features, roadmap ideas, or what the product 'should' do. "
+                "Speak only from your own lived experience: what worked for you, what frustrated you, "
+                "what you remember from when you first started, and what you hope or expect based on patterns you have observed. "
+                "When referencing the interface, describe it from memory as a user — not as a designer or critic. "
+                "Structure your response naturally: "
+                "1) your first impressions when you started using it, "
+                "2) what you actually use it for now and how it fits into your day, "
+                "3) moments of friction or delight you have experienced in the interface, "
+                "4) what you expect will happen next based on how things have been going."
             )
             msg = (
-                "Give me your honest, visceral reaction to this entire product dossier. "
-                "Reference concrete elements from the dossier when relevant.\n\n"
+                "Tell me about your experience using this product — past, present, and what you expect going forward. "
+                "Speak only as a user sharing what you have personally seen and felt.\n\n"
                 f"{full_research_dossier[:6000]}"
             )
             
@@ -286,11 +301,25 @@ class CustomerValidationAgent(BaseAgent):
         )
         user = SyntheticUser.model_validate(user_payload)
         prior_context = prior_response[:2500] if prior_response else "No prior interview transcript yet."
+        ui_context = (
+            f"\n\nVISUAL PROTOTYPE YOU HAVE USED:\n{ui_spec_text[:1500]}"
+            if ui_spec_text else ""
+        )
         system = (
             f"Identity: {user.bio()}\n"
             "Stay fully in character as this persona. "
-            "You are answering a follow-up interview question after having already reviewed the product dossier. "
-            "Answer naturally, specifically, and concisely. Reference your role, concerns, and prior reaction when useful."
+            "You are an A/B test participant answering a follow-up question about your experience using the product, "
+            "including its visual interface and flows."
+            + (
+                " You have hands-on experience with the prototype screens described below — "
+                "you know which screens you land on, what the navigation feels like, and where you get stuck or sail through."
+                if ui_spec_text else ""
+            )
+            + ui_context
+            + "\n\nSpeak only from your own usage — what you have done, seen, felt, or noticed. "
+            "Do NOT suggest features or tell the product team what to build. "
+            "When referencing the interface, describe it from memory as a user — not as a designer or critic. "
+            "Answer naturally, specifically, and concisely, grounded in your lived experience as a user."
         )
         prompt = (
             f"PRODUCT DOSSIER:\n{dossier_summary['dossier'][:4500]}\n\n"
@@ -568,11 +597,18 @@ Example: {{"name": "Priya Mehta", "gender": "female", "role": "Senior Product Ma
 
         async def interview(user: SyntheticUser) -> InterviewResult:
             system = (
-                f"Identity: {user.bio()}\nYou are participating in a blind market test. "
-                "Be authentic. If your personality or context suggests you would "
-                "dislike this, BE HARSH."
+                f"Identity: {user.bio()}\n"
+                "You are an A/B test participant who has been using this product. "
+                "Be authentic and honest about your actual experience. "
+                "Do NOT suggest features or tell the product team what to build. "
+                "Speak only as a user: share what you found useful, what confused you, "
+                "what you kept coming back to, and what left you indifferent."
             )
-            msg = f"Give me your honest, visceral reaction to this idea: {state['product_idea']}"
+            msg = (
+                f"Tell me about your experience using this product. "
+                f"Speak as someone who has actually used it — what was it like, past and present?\n\n"
+                f"{state['product_idea']}"
+            )
             llm = ChatGoogleGenerativeAI(
                 model="gemini-1.5-pro", temperature=0.7
             )  # Temp instance for async
