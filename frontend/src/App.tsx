@@ -787,6 +787,10 @@ export default function App() {
             <div className="nav-credit-dot" style={{ background: "#1a73e8" }} />
             <span className="nav-credit-brand">Google DeepMind:</span> LLMs
           </div>
+          <div className="nav-credit-item">
+            <div className="nav-credit-dot" style={{ background: "#10b981" }} />
+            <span className="nav-credit-brand">Pioneer:</span> Synthetic Data
+          </div>
         </div>
       </nav>
 

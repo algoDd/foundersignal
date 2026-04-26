@@ -41,6 +41,9 @@ class Settings(BaseSettings):
     hera_api_key: str = ""
     peec_api_key: str = ""
     gradium_api_key: str = ""
+    pioneer_api_key: str = ""
+    pioneer_api_url: str = "https://api.pioneer.ai/v1/chat/completions"
+    pioneer_model_id: str = ""
 
     # -------------------------------------------------------------------------
     # Helpers

@@ -14,6 +14,8 @@ import os
 import random
 from typing import Annotated, Any, TypedDict
 
+import httpx
+
 from dotenv import load_dotenv
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -21,6 +23,7 @@ from langgraph.graph import END, START, StateGraph
 from pydantic import BaseModel, Field
 
 from app.agents.base import BaseAgent
+from app.config import get_settings
 from app.models.schemas import CustomerValidationReport, RefinedIdea
 
 # --- 1. SCHEMAS & MODELS ---
@@ -71,6 +74,8 @@ load_dotenv()
 COHORT_SIZE = 5
 DEMOGRAPHIC_SIZE = 5
 TOTAL_CUSTOMERS = 100
+
+_settings = get_settings()
 
 
 class CustomerValidationAgent(BaseAgent):
@@ -221,35 +226,9 @@ Example: ["Early Adopter", "Skeptical Enterprise Buyer", "Budget-Conscious SMB O
         interview_responses: list[str] = []
 
         for archetype in archetypes:
-            # 2. Generate a persona context
-            ctx_prompt = f"""
-            Create a unique person profile for a user interview.
-            This persona MUST embody the archetype: '{archetype}'.
-            Focus on their role, pain points, and what they value in a solution.
-
-            Based on this Product Dossier:
-            {full_research_dossier[:4000]}
-
-            Return ONLY valid JSON with exactly these keys:
-            - "name": a realistic first and last name (e.g. "Sarah Chen", "Marcus Rodriguez") — NOT a placeholder
-            - "gender": either "male" or "female"
-            - "role": their job title or role
-            - "background": 1-2 sentences about their background
-            - "values": what they care most about
-
-            Example: {{"name": "Priya Mehta", "gender": "female", "role": "Senior Product Manager", "background": "10 years in B2B SaaS, frustrated with manual reporting.", "values": "Efficiency and clear ROI"}}
-            """
-            ctx_res, _ = await self._llm.generate(ctx_prompt, temperature=0.8)
+            # 2. Generate a persona context via Pioneer API
             try:
-                # Clean up the response if it has markdown blocks
-                clean_json = ctx_res.strip()
-                if "```json" in clean_json:
-                    clean_json = clean_json.split("```json")[1].split("```")[0].strip()
-                elif "```" in clean_json:
-                    clean_json = clean_json.split("```")[1].strip()
-
-                ctx_data = json.loads(clean_json)
-                # Ensure name field is present and meaningful
+                ctx_data = await self._generate_persona_via_pioneer(archetype, full_research_dossier)
                 if not ctx_data.get("name") or ctx_data["name"].startswith("User_"):
                     ctx_data["name"] = ctx_data.get("full_name") or ctx_data.get("persona_name") or f"{archetype} Respondent"
             except Exception:
@@ -404,6 +383,50 @@ Be direct and evidence-based. Ground every finding in what users actually said a
                 )
                 cohort.append(user)
         return {"cohort": cohort}
+
+    async def _generate_persona_via_pioneer(self, archetype: str, dossier: str) -> dict[str, Any]:
+        """Generates a customer persona using the Pioneer API."""
+        prompt = f"""
+Create a unique person profile for a user interview.
+This persona MUST embody the archetype: '{archetype}'.
+Focus on their role, pain points, and what they value in a solution.
+
+Based on this Product Dossier:
+{dossier[:4000]}
+
+Return ONLY valid JSON with exactly these keys:
+- "name": a realistic first and last name (e.g. "Sarah Chen", "Marcus Rodriguez") — NOT a placeholder
+- "gender": either "male" or "female"
+- "role": their job title or role
+- "background": 1-2 sentences about their background
+- "values": what they care most about
+
+Example: {{"name": "Priya Mehta", "gender": "female", "role": "Senior Product Manager", "background": "10 years in B2B SaaS, frustrated with manual reporting.", "values": "Efficiency and clear ROI"}}
+"""
+        payload = {
+            "model": _settings.pioneer_model_id,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.8,
+        }
+        headers = {
+            "Authorization": f"Bearer {_settings.pioneer_api_key}",
+            "Content-Type": "application/json",
+        }
+        print(f"[Pioneer] Calling {_settings.pioneer_api_url} for archetype: '{archetype}'")
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.post(_settings.pioneer_api_url, json=payload, headers=headers)
+            response.raise_for_status()
+            content = response.json()["choices"][0]["message"]["content"]
+        print(f"[Pioneer] Response received for '{archetype}' — content length: {len(content)} chars")
+
+        clean = content.strip()
+        if "```json" in clean:
+            clean = clean.split("```json")[1].split("```")[0].strip()
+        elif "```" in clean:
+            clean = clean.split("```")[1].strip()
+        result = json.loads(clean)
+        print(f"[Pioneer] Parsed persona: {result.get('name')} | {result.get('role')}")
+        return result
 
     def _generate_ocean_profile(self, archetype_name: str) -> OceanProfile:
         """Generates an OCEAN profile with archetype-influenced biases."""
