@@ -29,6 +29,7 @@ import ReactMarkdown from "react-markdown";
 import { AuthScreen } from "./components/AuthScreen";
 import { HomeScreen } from "./components/HomeScreen";
 import { IdeaPromptBar } from "./components/IdeaPromptBar";
+import StageDashboard from "./components/StageDashboard";
 import { useTypewriterPlaceholder } from "./hooks/useTypewriterPlaceholder";
 import InterviewChatModal from "./components/InterviewChatModal";
 
@@ -132,62 +133,6 @@ function useTTS() {
   return { state, play, stop };
 }
 
-// ── Donut chart ────────────────────────────────────────────────────────────
-function DonutChart({
-  value,
-  max,
-  label,
-}: {
-  value: number;
-  max: number;
-  label: string;
-}) {
-  const r = 36;
-  const circ = 2 * Math.PI * r;
-  const pct = max > 0 ? Math.min(value / max, 1) : 0;
-  const dash = pct * circ;
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: 20 }}>
-      <div className="donut-ring">
-        <svg className="donut-svg" width="90" height="90" viewBox="0 0 90 90">
-          <circle
-            cx="45"
-            cy="45"
-            r={r}
-            fill="none"
-            stroke="var(--border)"
-            strokeWidth="8"
-          />
-          <circle
-            cx="45"
-            cy="45"
-            r={r}
-            fill="none"
-            stroke="var(--primary)"
-            strokeWidth="8"
-            strokeDasharray={`${dash} ${circ}`}
-            strokeLinecap="round"
-          />
-        </svg>
-        <div className="donut-center">
-          {value > 999 ? `${(value / 1000).toFixed(1)}k` : value}
-          <span>{label}</span>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function extractBulletLines(markdown: string, limit = 4) {
-  return markdown
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line.startsWith("- ") || line.startsWith("* "))
-    .map((line) => line.slice(2).trim())
-    .filter(Boolean)
-    .slice(0, limit);
-}
-
 function extractParagraphs(markdown: string, limit = 2) {
   return markdown
     .split("\n\n")
@@ -195,6 +140,30 @@ function extractParagraphs(markdown: string, limit = 2) {
     .filter(Boolean)
     .filter((chunk) => !chunk.startsWith("- ") && !chunk.startsWith("* "))
     .slice(0, limit);
+}
+
+function extractMarkdownSection(markdown: string, heading: string) {
+  const escapedHeading = heading.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = markdown.match(new RegExp(`## ${escapedHeading}[\\s\\S]*?(?=\\n## |$)`, "i"));
+  if (!match) return "";
+  return match[0].replace(new RegExp(`^## ${escapedHeading}\\n?`, "i"), "").trim();
+}
+
+function deriveSessionTitle(session: any) {
+  const directTitle = session?.title?.trim();
+  if (directTitle) return directTitle;
+
+  const directIdea = session?.idea?.trim();
+  if (directIdea) return directIdea.slice(0, 90);
+
+  const nestedIdea = session?.input?.idea?.trim();
+  if (nestedIdea) return nestedIdea.slice(0, 90);
+
+  const refineText = session?.results_map?.refine || "";
+  const pitch = extractMarkdownSection(refineText, "Draft Pitch");
+  if (pitch) return pitch.replace(/\n+/g, " ").slice(0, 90);
+
+  return "Untitled session";
 }
 
 // ── Main App ───────────────────────────────────────────────────────────────
@@ -255,7 +224,6 @@ export default function App() {
   );
   const hasResults = Object.keys(results).length > 0;
   const activeMarkdown = results[activeTab] || "";
-  const activeBullets = extractBulletLines(activeMarkdown, 4);
   const activeParagraphs = extractParagraphs(activeMarkdown, 2);
   const activeAgent = AGENTS.find((a) => a.id === activeTab);
   const activeSearches = searches[activeTab]?.length || 0;
@@ -329,7 +297,14 @@ export default function App() {
         headers: getHeaders(),
       });
       if (!r.ok) throw new Error("Failed to load sessions");
-      setSessions(await r.json());
+      const rawSessions = await r.json();
+      setSessions(
+        rawSessions.map((session: any) => ({
+          ...session,
+          title: deriveSessionTitle(session),
+          idea: session.idea || session.input?.idea || "",
+        })),
+      );
     } catch {}
   };
 
@@ -338,9 +313,10 @@ export default function App() {
       const r = await fetch(`${API_BASE}/agents/sessions/${sessionId}`, {
         headers: getHeaders(),
       });
+      if (!r.ok) throw new Error("Failed to load session");
       const d = await r.json();
-      setIdea(d.input.idea);
-      setCurrentSessionId(d.report_id);
+      setIdea(d.input?.idea || d.idea || "");
+      setCurrentSessionId(d.report_id || sessionId);
       setResults(d.results_map || {});
       setStatus(d.status_map || {});
       setTokens(d.tokens_map || {});
@@ -349,7 +325,10 @@ export default function App() {
       setInterviewReport(d.interview_report || "");
       setSelectedInterviewIndex((d.interviews || []).length ? 0 : null);
       setActiveTab("overview");
-    } catch {}
+      setGlobalError(null);
+    } catch (error: any) {
+      setGlobalError(error?.message || "Unable to open this saved session.");
+    }
   };
 
   const saveCurrentSession = async (
@@ -368,6 +347,7 @@ export default function App() {
         headers: getHeaders(true),
         body: JSON.stringify({
           report_id: id,
+          title: idea.trim().slice(0, 90),
           input: { idea },
           results_map: r,
           status_map: s,
@@ -422,6 +402,22 @@ export default function App() {
     setAuthUser(null);
     setSessions([]);
     setCurrentSessionId(null);
+  };
+
+  const goHome = () => {
+    setIdea("");
+    setResults({});
+    setStatus({});
+    setTokens({});
+    setSearches({});
+    setInterviews([]);
+    setInterviewReport("");
+    setSelectedInterviewIndex(null);
+    setCurrentSessionId(null);
+    setIsSimulating(false);
+    setGlobalError(null);
+    setActiveTab("overview");
+    setContentMode("dashboard");
   };
 
   // ── Streaming ────────────────────────────────────────────────────────────
@@ -882,7 +878,7 @@ export default function App() {
                     className={`nav-item session-row${currentSessionId === s.id ? " active" : ""}`}
                     onClick={() => loadSession(s.id)}
                   >
-                    <div className="session-idea">{s.idea}</div>
+                    <div className="session-idea">{s.title || s.idea}</div>
                     <div className="session-date">
                       {new Date(s.created_at).toLocaleDateString()}
                     </div>
@@ -951,14 +947,9 @@ export default function App() {
             </button>
             <button
               className="btn-new"
-              onClick={() => {
-                setIdea("");
-                setResults({});
-                setStatus({});
-                setCurrentSessionId(null);
-              }}
+              onClick={goHome}
             >
-              <Plus size={14} /> New Analysis
+              <Plus size={14} /> Go To Home
             </button>
             <div className="topbar-avatar">
               <div className="topbar-avatar-img">F</div>
@@ -1619,7 +1610,7 @@ export default function App() {
                             className="template-name"
                             style={{ fontSize: "0.8rem" }}
                           >
-                            {s.idea?.slice(0, 50) || "Untitled"}
+                            {s.title?.slice(0, 50) || s.idea?.slice(0, 50) || "Untitled"}
                           </div>
                           <div className="template-desc">
                             {new Date(s.created_at).toLocaleDateString()}
@@ -1649,7 +1640,7 @@ export default function App() {
                     {activeAgent?.label || activeTab}
                   </div>
                   <div style={{ fontSize: "0.8rem", color: "var(--text-secondary)" }}>
-                    Switch between a fast dashboard summary and the full written output.
+                    Use the TL;DR view for the fastest signal, or switch into the full written analysis.
                   </div>
                 </div>
                 <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
@@ -1662,7 +1653,7 @@ export default function App() {
                         borderColor: contentMode === "dashboard" ? "var(--primary-border)" : undefined,
                       }}
                     >
-                      Dashboard
+                      TL;DR
                     </button>
                     <button
                       className="btn-ghost"
@@ -1672,7 +1663,7 @@ export default function App() {
                         borderColor: contentMode === "reading" ? "var(--primary-border)" : undefined,
                       }}
                     >
-                      Reading
+                      Full Read
                     </button>
                   </div>
                   <button
@@ -1698,62 +1689,15 @@ export default function App() {
                 </div>
               </div>
               {contentMode === "dashboard" ? (
-                <div style={{ display: "grid", gridTemplateColumns: "260px 1fr", gap: 18 }}>
-                  <div className="card" style={{ gap: 16 }}>
-                    <DonutChart value={activeTokens} max={Math.max(activeTokens, 1000)} label="tokens" />
-                    <DonutChart value={activeSearches} max={Math.max(activeSearches, 4)} label="searches" />
-                    <div className="stat-panel">
-                      <div className="stat-panel-label">Status</div>
-                      <div className="stat-panel-value" style={{ fontSize: "1.1rem" }}>
-                        {status[activeTab] || "pending"}
-                      </div>
-                    </div>
-                  </div>
-                  <div style={{ display: "grid", gap: 18 }}>
-                    <div className="card">
-                      <div className="card-header">
-                        <div className="card-title">What matters most</div>
-                      </div>
-                      <div style={{ display: "grid", gap: 10 }}>
-                        {(activeBullets.length ? activeBullets : ["No summary bullets yet."]).map((item) => (
-                          <div key={item} className="alert-item">
-                            <div className="alert-dot info" />
-                            <div className="alert-text">{item}</div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18 }}>
-                      <div className="card">
-                        <div className="card-header">
-                          <div className="card-title">Executive takeaway</div>
-                        </div>
-                        <div className="markdown-content">
-                          <ReactMarkdown>{activeParagraphs[0] || "No executive summary available yet."}</ReactMarkdown>
-                        </div>
-                      </div>
-                      <div className="card">
-                        <div className="card-header">
-                          <div className="card-title">Research activity</div>
-                        </div>
-                        <div style={{ display: "grid", gap: 10 }}>
-                          {(searches[activeTab] || []).slice(0, 4).map((entry: any) => (
-                            <div key={`${entry.query}-${entry.timestamp || ""}`} className="template-card" style={{ cursor: "default" }}>
-                              <div className="template-tag">Search</div>
-                              <div className="template-name" style={{ fontSize: "0.8rem" }}>{entry.query}</div>
-                              <div className="template-desc">{entry.results_count || 0} results</div>
-                            </div>
-                          ))}
-                          {activeSearches === 0 && (
-                            <div style={{ color: "var(--text-muted)", fontSize: "0.82rem" }}>
-                              No web searches were needed for this step.
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
+                <StageDashboard
+                  activeTab={activeTab}
+                  activeTokens={activeTokens}
+                  activeSearches={activeSearches}
+                  markdown={activeMarkdown}
+                  paragraph={activeParagraphs[0] || ""}
+                  searches={searches[activeTab] || []}
+                  status={status[activeTab] || "pending"}
+                />
               ) : (
                 <div className="markdown-content">
                   <ReactMarkdown>{results[activeTab] || ""}</ReactMarkdown>

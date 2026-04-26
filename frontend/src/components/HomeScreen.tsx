@@ -4,6 +4,7 @@ interface SessionSummary {
   created_at: string;
   id: string;
   idea?: string;
+  title?: string;
 }
 
 interface HomeScreenProps {
@@ -68,12 +69,12 @@ export function HomeScreen({
           <section className="home-hero">
             <div className="home-badge">
               <Sparkles size={14} />
-              Dashboard-first founder workflow
+              Startup validation workspace
             </div>
-            <h1 className="home-title">Describe your startup idea and turn it into a visual, reviewable signal chain.</h1>
+            <h1 className="home-title">Describe your startup idea and turn it into market research, competition insight, and realistic user interviews.</h1>
             <p className="home-sub">
-              Start with ideation, review the strongest takeaways, resume any saved session, and build toward a fast
-              2-minute demo story.
+              Start with a crisp idea refinement, move through research and validation, and come back to any saved
+              founder workflow without losing progress.
             </p>
 
             <div className="home-prompt-card">
@@ -81,12 +82,13 @@ export function HomeScreen({
                 <div>
                   <div className="home-prompt-label">Describe your startup idea</div>
                   <div className="home-prompt-sub">
-                    One clear paragraph is enough. We will handle refinement, market research, competition, UX, and interviews.
+                    Share the problem, customer, and rough solution. FounderSignal will turn that into a guided startup
+                    diligence flow with checkpoints and visual dashboards.
                   </div>
                 </div>
                 <div className="home-prompt-chip">
                   <TrendingUp size={13} />
-                  Idea to signal chain
+                  Validation pipeline
                 </div>
               </div>
               <textarea
@@ -103,7 +105,7 @@ export function HomeScreen({
                 </button>
                 <div className="home-prompt-meta">
                   <span>Idea refinement first</span>
-                  <span>Human checkpoints built in</span>
+                  <span>Research and interviews next</span>
                 </div>
               </div>
             </div>
@@ -167,7 +169,7 @@ export function HomeScreen({
                     >
                       <div className="home-session-rank">0{index + 1}</div>
                       <div className="home-session-copy">
-                        <div className="home-session-idea">{session.idea?.trim() || "Untitled session"}</div>
+                        <div className="home-session-idea">{session.title?.trim() || session.idea?.trim() || "Untitled session"}</div>
                         <div className="home-session-meta">{formatSessionDate(session.created_at)}</div>
                       </div>
                       <ArrowRight size={15} />
