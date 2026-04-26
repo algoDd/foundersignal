@@ -33,6 +33,11 @@ import { IdeaPromptBar } from "./components/IdeaPromptBar";
 import StageDashboard from "./components/StageDashboard";
 import { useTypewriterPlaceholder } from "./hooks/useTypewriterPlaceholder";
 import InterviewChatModal from "./components/InterviewChatModal";
+import {
+  extractMarkdownSection,
+  extractParagraphs,
+  normalizeMarkdown,
+} from "./utils/markdown";
 
 const TOTAL_INTERVIEWS = 7; // minimum interviews shown; update to match backend archetype count
 const API_BASE = "http://localhost:8000/api/v1";
@@ -132,22 +137,6 @@ function useTTS() {
   );
 
   return { state, play, stop };
-}
-
-function extractParagraphs(markdown: string, limit = 2) {
-  return markdown
-    .split("\n\n")
-    .map((chunk) => chunk.replace(/^#+\s+/gm, "").trim())
-    .filter(Boolean)
-    .filter((chunk) => !chunk.startsWith("- ") && !chunk.startsWith("* "))
-    .slice(0, limit);
-}
-
-function extractMarkdownSection(markdown: string, heading: string) {
-  const escapedHeading = heading.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const match = markdown.match(new RegExp(`## ${escapedHeading}[\\s\\S]*?(?=\\n## |$)`, "i"));
-  if (!match) return "";
-  return match[0].replace(new RegExp(`^## ${escapedHeading}\\n?`, "i"), "").trim();
 }
 
 function deriveSessionTitle(session: any) {
@@ -1699,7 +1688,7 @@ export default function App() {
                 />
               ) : (
                 <div className="markdown-content">
-                  <ReactMarkdown>{results[activeTab] || ""}</ReactMarkdown>
+                  <ReactMarkdown>{normalizeMarkdown(results[activeTab] || "")}</ReactMarkdown>
                 </div>
               )}
             </div>
@@ -1874,7 +1863,7 @@ export default function App() {
                     {interviews[selectedInterviewIndex].response ? (
                       <div className="markdown-content">
                         <ReactMarkdown>
-                          {interviews[selectedInterviewIndex].response}
+                          {normalizeMarkdown(interviews[selectedInterviewIndex].response)}
                         </ReactMarkdown>
                       </div>
                     ) : (
@@ -1940,7 +1929,7 @@ export default function App() {
                   )}
                 </div>
                 {interviewReport
-                  ? <div className="markdown-content"><ReactMarkdown>{interviewReport}</ReactMarkdown></div>
+                  ? <div className="markdown-content"><ReactMarkdown>{normalizeMarkdown(interviewReport)}</ReactMarkdown></div>
                   : <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                       {[80, 60, 70, 50].map((w, i) => (
                         <div key={i} className="skeleton-line" style={{ width: `${w}%`, height: 12, borderRadius: 4 }} />

@@ -1,5 +1,6 @@
 import { useRef, useEffect } from "react";
 import ReactMarkdown from "react-markdown";
+import { normalizeMarkdown } from "../utils/markdown";
 
 interface ChatMessage {
   role: string;
@@ -163,7 +164,7 @@ export default function InterviewChatModal({
                     </span>
                   </div>
                 ) : (
-                  <ReactMarkdown>{msg.content}</ReactMarkdown>
+                  <ReactMarkdown>{normalizeMarkdown(msg.content)}</ReactMarkdown>
                 )}
               </div>
             </div>

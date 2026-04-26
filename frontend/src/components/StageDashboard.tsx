@@ -6,6 +6,12 @@ import {
   Search,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
+import {
+  extractBulletLines,
+  extractMarkdownSection,
+  normalizeMarkdown,
+  stripMarkdown,
+} from "../utils/markdown";
 
 type StageStatus = "pending" | "running" | "completed" | "error";
 
@@ -30,23 +36,6 @@ interface HighlightItem {
   text: string;
 }
 
-function extractBulletLines(markdown: string, limit = 4) {
-  return markdown
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line.startsWith("- ") || line.startsWith("* "))
-    .map((line) => line.slice(2).trim())
-    .filter(Boolean)
-    .slice(0, limit);
-}
-
-function extractMarkdownSection(markdown: string, heading: string) {
-  const escapedHeading = heading.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const match = markdown.match(new RegExp(`## ${escapedHeading}[\\s\\S]*?(?=\\n## |$)`, "i"));
-  if (!match) return "";
-  return match[0].replace(new RegExp(`^## ${escapedHeading}\\n?`, "i"), "").trim();
-}
-
 function getStageHighlights(stageId: string, markdown: string) {
   const sectionMap: Record<string, string[]> = {
     refine: ["Problem", "Solution", "Why It Wins", "Best Early User"],
@@ -65,10 +54,11 @@ function getStageHighlights(stageId: string, markdown: string) {
       if (!body) return null;
       return {
         label,
-        text:
+        text: stripMarkdown(
           body.split("\n").find((line) => line.trim() && !line.trim().startsWith("- "))?.trim() ||
-          body.split("\n")[0]?.trim() ||
-          "",
+            body.split("\n")[0]?.trim() ||
+            "",
+        ),
       };
     })
     .filter(Boolean) as HighlightItem[];
@@ -87,7 +77,7 @@ function getSectionBullets(markdown: string, heading: string, limit = 5) {
     .split("\n")
     .map((line) => line.trim())
     .filter((line) => line.startsWith("- ") || line.startsWith("* "))
-    .map((line) => line.slice(2).trim())
+    .map((line) => stripMarkdown(line.slice(2).trim()))
     .filter(Boolean)
     .slice(0, limit);
 }
@@ -160,8 +150,8 @@ function MiniBarChart({ items }: { items: { label: string; value: number; tone?:
       </div>
       <div className="viz-stack">
         {items.map((item) => (
-          <div key={item.label} className="viz-bar-row">
-            <div className="viz-bar-label">{item.label}</div>
+            <div key={item.label} className="viz-bar-row">
+            <div className="viz-bar-label">{stripMarkdown(item.label)}</div>
             <div className="viz-bar-track">
               <div
                 className={`viz-bar-fill ${item.tone || ""}`}
@@ -206,7 +196,7 @@ function PieLegend({
           {items.map((item) => (
             <div key={item.label} className="pie-legend-row">
               <span className="pie-dot" style={{ background: item.color }} />
-              <span className="pie-legend-label">{item.label}</span>
+              <span className="pie-legend-label">{stripMarkdown(item.label)}</span>
               <strong>{item.value}</strong>
             </div>
           ))}
@@ -233,7 +223,7 @@ function HeatmapGrid({
         {items.map((item) => (
           <div key={item.label} className="heatmap-cell">
             <div className="heatmap-cell-head">
-              <span>{item.label}</span>
+              <span>{stripMarkdown(item.label)}</span>
               <strong>{item.score}</strong>
             </div>
             <div className="heatmap-track">
@@ -259,7 +249,7 @@ function CompanyPresence({ companies }: { companies: { name: string; badge: stri
             <span className="company-badge" style={{ background: company.color }}>
               {company.badge}
             </span>
-            <span className="company-name">{company.name}</span>
+            <span className="company-name">{stripMarkdown(company.name)}</span>
           </div>
         ))}
       </div>
@@ -277,7 +267,7 @@ function SearchList({ searches }: { searches: SearchEntry[] }) {
       <div className="viz-stack">
         {searches.slice(0, 4).map((entry) => (
           <div key={`${entry.query}-${entry.timestamp || ""}`} className="search-row">
-            <div className="search-query">{entry.query}</div>
+            <div className="search-query">{stripMarkdown(entry.query || "")}</div>
             <div className="search-meta">{entry.results_count || 0} results</div>
           </div>
         ))}
@@ -304,6 +294,97 @@ function genericCompanies(markdown: string) {
   ];
 
   return brandMap.filter((brand) => new RegExp(`\\b${brand.name}\\b`, "i").test(markdown)).slice(0, 6);
+}
+
+function DecisionCard({
+  label,
+  text,
+  tone = "neutral",
+}: {
+  label: string;
+  text: string;
+  tone?: "neutral" | "success" | "warning" | "danger" | "info";
+}) {
+  return (
+    <div className={`decision-card ${tone}`}>
+      <div className="decision-label">{stripMarkdown(label)}</div>
+      <div className="decision-text">{stripMarkdown(text) || "Not enough signal yet."}</div>
+    </div>
+  );
+}
+
+function renderDecisionBoard(activeTab: string, markdown: string) {
+  const boardMap: Record<string, { label: string; heading: string; tone?: "neutral" | "success" | "warning" | "danger" | "info" }[]> = {
+    refine: [
+      { label: "User pain", heading: "Problem", tone: "danger" },
+      { label: "Best solution angle", heading: "Solution", tone: "success" },
+      { label: "Who should care first", heading: "Best Early User", tone: "info" },
+      { label: "Why this is credible", heading: "Why It Wins", tone: "warning" },
+    ],
+    market: [
+      { label: "Market snapshot", heading: "Market Snapshot", tone: "info" },
+      { label: "Biggest upside", heading: "Opportunities", tone: "success" },
+      { label: "Sharpest risk", heading: "Risks", tone: "danger" },
+      { label: "What the data says", heading: "Key Data Points & Sources", tone: "warning" },
+    ],
+    competitors: [
+      { label: "Current field", heading: "Competitive Landscape", tone: "info" },
+      { label: "Where they win", heading: "Where They Win", tone: "warning" },
+      { label: "Where they break", heading: "Where They Are Weak", tone: "danger" },
+      { label: "Your wedge", heading: "Your Wedge", tone: "success" },
+    ],
+    ux: [
+      { label: "Path to value", heading: "The Path to Value", tone: "success" },
+      { label: "Make-or-break moment", heading: "Moments That Matter", tone: "info" },
+      { label: "Main friction", heading: "Friction To Remove", tone: "danger" },
+      { label: "What to build first", heading: "Key Feature Roadmap", tone: "warning" },
+    ],
+    ui: [
+      { label: "First impression", heading: "The Hero Section", tone: "info" },
+      { label: "Core experience", heading: "Core Screens", tone: "success" },
+      { label: "Interaction feel", heading: "Interaction Style", tone: "warning" },
+      { label: "Visual direction", heading: "Design Direction", tone: "neutral" },
+    ],
+    visibility: [
+      { label: "Current visibility", heading: "Visibility Snapshot", tone: "info" },
+      { label: "Fastest gains", heading: "Fast Wins", tone: "success" },
+      { label: "What to fix", heading: "What To Improve", tone: "danger" },
+      { label: "Content angle", heading: "Content Wedges", tone: "warning" },
+    ],
+    scoring: [
+      { label: "Verdict", heading: "The Verdict: [GO / PIVOT / NO-GO]", tone: "info" },
+      { label: "Why now", heading: "Why", tone: "success" },
+      { label: "Risk watch", heading: "Key Risks", tone: "danger" },
+      { label: "Best next move", heading: "Next Steps", tone: "warning" },
+    ],
+  };
+
+  const config = boardMap[activeTab] || [];
+  const cards = config
+    .map((item) => ({
+      ...item,
+      text: extractMarkdownSection(markdown, item.heading),
+    }))
+    .filter((item) => item.text);
+
+  if (!cards.length) {
+    return (
+      <div className="decision-board">
+        <DecisionCard
+          label="Stage summary"
+          text={getStageHighlights(activeTab, markdown).map((item) => item.text).join(" ")}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div className="decision-board">
+      {cards.map((item) => (
+        <DecisionCard key={item.label} label={item.label} text={item.text} tone={item.tone} />
+      ))}
+    </div>
+  );
 }
 
 function buildStageVisuals(activeTab: string, markdown: string, searches: SearchEntry[]) {
@@ -533,6 +614,8 @@ export default function StageDashboard({
       </div>
 
       <div style={{ display: "grid", gap: 18 }}>
+        {renderDecisionBoard(activeTab, markdown)}
+
         <div className="stage-tldr-grid">
           {highlights.length ? (
             highlights.map((item) => (
@@ -571,7 +654,7 @@ export default function StageDashboard({
               <div className="card-title">Bottom line</div>
             </div>
             <div className="markdown-content">
-              <ReactMarkdown>{paragraph || "No executive summary available yet."}</ReactMarkdown>
+              <ReactMarkdown>{normalizeMarkdown(paragraph || "No executive summary available yet.")}</ReactMarkdown>
             </div>
           </div>
         </div>
