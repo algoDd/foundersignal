@@ -1,4 +1,5 @@
-import { ArrowRight, Clock3, History, Play, Sparkles, TrendingUp, Zap } from "lucide-react";
+import { ArrowRight, Clock3, Play } from "lucide-react";
+import { MarketPulseLogo } from "./MarketPulseLogo";
 
 interface SessionSummary {
   created_at: string;
@@ -46,117 +47,54 @@ export function HomeScreen({
       <div className="home-page">
         <header className="home-topbar">
           <div className="home-brand">
-            <div className="landing-icon">
-              <Zap size={24} />
-            </div>
-            <div>
-              <div className="home-brand-name">FounderSignal</div>
-              <div className="home-brand-sub">Your startup diligence cockpit</div>
-            </div>
+            <MarketPulseLogo size={32} />
+            <span className="home-brand-name">MarketPulse</span>
           </div>
           <div className="home-user">
-            <div className="home-user-copy">
-              <span className="home-user-label">Signed in as</span>
-              <strong>{firstName}</strong>
-            </div>
+            <span className="home-user-label">{firstName}</span>
             <button className="btn-ghost" onClick={onSignOut}>
-              Sign Out
+              Sign out
             </button>
           </div>
         </header>
 
         <div className="home-grid">
           <section className="home-hero">
-            <div className="home-badge">
-              <Sparkles size={14} />
-              Startup validation workspace
-            </div>
-            <h1 className="home-title">Describe your startup idea and turn it into market research, competition insight, and realistic user interviews.</h1>
+            <h1 className="home-title">What do you want to bring to market?</h1>
             <p className="home-sub">
-              Start with a crisp idea refinement, move through research and validation, and come back to any saved
-              founder workflow without losing progress.
+              A new startup, an existing product, or just a feature — describe what you're building and who it's for. We'll research the market, map competitors, and run simulated customer interviews.
             </p>
 
-            <div className="home-prompt-card">
-              <div className="home-prompt-header">
-                <div>
-                  <div className="home-prompt-label">Describe your startup idea</div>
-                  <div className="home-prompt-sub">
-                    Share the problem, customer, and rough solution. FounderSignal will turn that into a guided startup
-                    diligence flow with checkpoints and visual dashboards.
-                  </div>
-                </div>
-                <div className="home-prompt-chip">
-                  <TrendingUp size={13} />
-                  Validation pipeline
-                </div>
-              </div>
-              <textarea
-                value={idea}
-                onChange={(event) => onIdeaChange(event.target.value)}
-                placeholder={placeholder}
-                rows={5}
-                className="landing-textarea home-prompt-textarea"
-              />
-              <div className="home-prompt-actions">
-                <button className="btn-primary" onClick={onStartAnalysis} disabled={!idea.trim() || isOrchestrating}>
-                  {isOrchestrating ? <Play size={16} /> : <ArrowRight size={16} />}
-                  {isOrchestrating ? "Running analysis..." : "Get Signals"}
-                </button>
-                <div className="home-prompt-meta">
-                  <span>Idea refinement first</span>
-                  <span>Research and interviews next</span>
-                </div>
-              </div>
-            </div>
-
-            <div className="home-value-grid">
-              <div className="home-value-card">
-                <div className="home-value-icon">
-                  <Sparkles size={16} />
-                </div>
-                <div>
-                  <div className="home-value-title">Crisp idea refinement</div>
-                  <div className="home-value-text">Readable, checkpoint-driven outputs instead of giant agent dumps.</div>
-                </div>
-              </div>
-              <div className="home-value-card">
-                <div className="home-value-icon">
-                  <TrendingUp size={16} />
-                </div>
-                <div>
-                  <div className="home-value-title">Visual stage dashboards</div>
-                  <div className="home-value-text">Switch between dashboards and deeper reading whenever you want.</div>
-                </div>
-              </div>
-              <div className="home-value-card">
-                <div className="home-value-icon">
-                  <History size={16} />
-                </div>
-                <div>
-                  <div className="home-value-title">Resume any chain</div>
-                  <div className="home-value-text">Saved sessions stay ready for review, interviews, and iteration.</div>
-                </div>
-              </div>
+            <textarea
+              value={idea}
+              onChange={(event) => onIdeaChange(event.target.value)}
+              placeholder={placeholder}
+              rows={5}
+              className="landing-textarea home-prompt-textarea"
+            />
+            <div className="home-prompt-actions">
+              <button className="btn-primary" onClick={onStartAnalysis} disabled={!idea.trim() || isOrchestrating}>
+                {isOrchestrating ? <Play size={16} /> : <ArrowRight size={16} />}
+                {isOrchestrating ? "Running..." : "Analyse"}
+              </button>
             </div>
           </section>
 
           <aside className="home-sidebar">
             <div className="home-sidebar-card">
               <div className="home-sidebar-header">
-                <div>
-                  <div className="home-sidebar-title">Previous sessions</div>
-                  <div className="home-sidebar-sub">Open a saved chain and continue from the exact stage you left.</div>
-                </div>
-                <div className="home-session-count">{sessions.length}</div>
+                <div className="home-sidebar-title">Previous sessions</div>
+                {sessions.length > 0 && (
+                  <div className="home-session-count">{sessions.length}</div>
+                )}
               </div>
 
               {recentSessions.length === 0 ? (
                 <div className="home-empty">
                   <Clock3 size={18} />
                   <div>
-                    <div className="home-empty-title">No saved sessions yet</div>
-                    <div className="home-empty-text">Run your first idea and it will appear here for quick resume.</div>
+                    <div className="home-empty-title">Nothing here yet</div>
+                    <div className="home-empty-text">Your past analyses will show up here.</div>
                   </div>
                 </div>
               ) : (
@@ -169,7 +107,7 @@ export function HomeScreen({
                     >
                       <div className="home-session-rank">0{index + 1}</div>
                       <div className="home-session-copy">
-                        <div className="home-session-idea">{session.title?.trim() || session.idea?.trim() || "Untitled session"}</div>
+                        <div className="home-session-idea">{session.title?.trim() || session.idea?.trim() || "Untitled"}</div>
                         <div className="home-session-meta">{formatSessionDate(session.created_at)}</div>
                       </div>
                       <ArrowRight size={15} />
@@ -177,15 +115,6 @@ export function HomeScreen({
                   ))}
                 </div>
               )}
-            </div>
-
-            <div className="home-sidebar-card home-tech-card">
-              <div className="home-sidebar-title">Hackathon stack</div>
-              <div className="home-tech-list">
-                <span>Gemini for multi-agent reasoning</span>
-                <span>Tavily for research and live web context</span>
-                <span>Firestore for resume and stage persistence</span>
-              </div>
             </div>
           </aside>
         </div>

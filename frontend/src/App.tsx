@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import { AuthScreen } from "./components/AuthScreen";
+import { MarketPulseLogo } from "./components/MarketPulseLogo";
 import { HomeScreen } from "./components/HomeScreen";
 import { IdeaPromptBar } from "./components/IdeaPromptBar";
 import StageDashboard from "./components/StageDashboard";
@@ -749,10 +750,8 @@ export default function App() {
       {/* ── Left nav ── */}
       <nav className="left-nav">
         <div className="nav-brand">
-          <div className="nav-brand-icon">
-            <Zap size={16} />
-          </div>
-          <span className="nav-brand-name">FounderSignal</span>
+          <MarketPulseLogo size={24} />
+          <span className="nav-brand-name">MarketPulse</span>
         </div>
 
         <div className="nav-body">
@@ -949,7 +948,7 @@ export default function App() {
               className="btn-new"
               onClick={goHome}
             >
-              <Plus size={14} /> Go To Home
+              <Plus size={14} /> New Idea
             </button>
             <div className="topbar-avatar">
               <div className="topbar-avatar-img">F</div>

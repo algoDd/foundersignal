@@ -1,4 +1,5 @@
 import { Shield, Sparkles, Zap } from "lucide-react";
+import { MarketPulseLogo } from "./MarketPulseLogo";
 
 interface AuthScreenProps {
   authEmail: string;
@@ -27,28 +28,17 @@ export function AuthScreen({
     <div className="landing auth-shell">
       <div className="auth-layout">
         <section className="auth-story">
-          <div className="landing-icon">
-            <Zap size={26} />
-          </div>
-          <div className="auth-eyebrow">FounderSignal</div>
-          <h1 className="auth-title">Build founder conviction with research, interviews, and live signals.</h1>
+          <MarketPulseLogo size={48} />
+          <div className="auth-eyebrow">MarketPulse</div>
+          <h1 className="auth-title">See how the market reacts to your product before you enter it.</h1>
           <p className="auth-sub">
-            Sign in to save every stage in Firestore, resume unfinished chains, and turn research into a polished
-            hackathon-ready story.
+            Validate your idea with real market signals, simulated customer interviews, and competitive research — all
+            before you commit a single line of code.
           </p>
-          <div className="auth-feature-list">
-            <div className="auth-feature-item">
-              <Sparkles size={16} />
-              <span>Gemini-powered multi-agent startup analysis</span>
-            </div>
-            <div className="auth-feature-item">
-              <Shield size={16} />
-              <span>User-scoped saved sessions with secure email auth</span>
-            </div>
-            <div className="auth-feature-item">
-              <Zap size={16} />
-              <span>Tavily research, interview simulation, and visual dashboards</span>
-            </div>
+          <div className="auth-chips">
+            <span className="auth-chip"><Sparkles size={12} />AI-driven research</span>
+            <span className="auth-chip"><Shield size={12} />Simulated customers</span>
+            <span className="auth-chip"><Zap size={12} />Visual dashboards</span>
           </div>
         </section>
 
@@ -70,12 +60,12 @@ export function AuthScreen({
 
           <div>
             <h2 className="landing-title" style={{ fontSize: "1.4rem" }}>
-              {authMode === "sign-in" ? "Welcome back" : "Create your workspace"}
+              {authMode === "sign-in" ? "Welcome back" : "Get started for free"}
             </h2>
             <p className="landing-sub">
               {authMode === "sign-in"
-                ? "Pick up where you left off and reopen saved chains."
-                : "Create an account to save every stage and revisit it anytime."}
+                ? "Continue your validation — pick up right where you left off."
+                : "Create an account and start validating your idea in minutes."}
             </p>
           </div>
 
