@@ -1,37 +1,35 @@
-import { useState, useEffect, useRef } from 'react';
-import { Activity, Sparkles, Target, Zap, CheckCircle2, Cpu, BarChart3, Layout, Layers, Globe, Search, ArrowRight, Clock, ChevronLeft, Quote, Radar, UserRound, Play, Pause } from 'lucide-react';
-import ReactMarkdown from 'react-markdown';
+import { useState, useEffect, useRef, useCallback } from "react";
+import {
+  Activity,
+  Sparkles,
+  Target,
+  Zap,
+  CheckCircle2,
+  Cpu,
+  BarChart3,
+  Layout,
+  Layers,
+  Globe,
+  Search,
+  ArrowRight,
+  Clock,
+  BarChart2,
+  Users,
+  Settings,
+  ChevronRight,
+  Volume2,
+  Square,
+  Plus,
+  Radio,
+  TrendingUp,
+  Download,
+  Moon,
+  Sun,
+} from "lucide-react";
+import ReactMarkdown from "react-markdown";
 
-type SectionDecision = 'pending' | 'accepted' | 'revise';
-type SectionReviewState = Record<string, { decision: SectionDecision; notes: string }>;
-type ResearchReviewState = Record<'market' | 'competitors', string>;
-type InterviewStatus = 'building' | 'ready' | 'interviewing' | 'complete';
+const TOTAL_INTERVIEWS = 7; // minimum interviews shown; update to match backend archetype count
 
-type InterviewEntry = {
-  user: {
-    name: string;
-    archetype: string;
-    ocean?: Record<string, number>;
-    context: {
-      role?: string;
-      background?: string;
-      company_or_context?: string;
-      values?: string[];
-      pain_points?: string[];
-      interview_style?: string;
-      quote_seed?: string;
-      [key: string]: any;
-    };
-  };
-  response: string;
-  is_complete: boolean;
-  status: InterviewStatus;
-  focus_points: string[];
-  research_highlights?: Record<string, any>;
-  followUps?: Array<{ question: string; answer: string; isStreaming?: boolean }>;
-};
-
-// Config
 const AGENTS = [
   {
     id: "refine",
@@ -67,358 +65,306 @@ const AGENTS = [
   },
 ];
 
-const parseRefinementSections = (markdown: string) => {
-  const lines = markdown.split('\n');
-  const sections: Array<{ key: string; title: string; content: string }> = [];
-  let currentTitle = '';
-  let currentLines: string[] = [];
+// ── TTS hook ──────────────────────────────────────────────────────────────
+function useTTS() {
+  const [state, setState] = useState<"idle" | "loading" | "playing">("idle");
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const sourceRef = useRef<AudioBufferSourceNode | null>(null);
+  const readerRef = useRef<ReadableStreamDefaultReader | null>(null);
 
-  const pushSection = () => {
-    if (!currentTitle) return;
-    sections.push({
-      key: currentTitle.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, ''),
-      title: currentTitle,
-      content: currentLines.join('\n').trim()
-    });
+  const stop = useCallback(() => {
+    readerRef.current?.cancel().catch(() => {});
+    readerRef.current = null;
+    sourceRef.current?.stop();
+    sourceRef.current = null;
+    setState("idle");
+  }, []);
+
+  const play = useCallback(
+    async (text: string, archetype: string, gender: string) => {
+      stop();
+      setState("loading");
+      try {
+        const ctx = new AudioContext();
+        audioCtxRef.current = ctx;
+        const res = await fetch("http://localhost:8000/api/v1/agents/tts", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text, archetype, gender }),
+        });
+        if (!res.ok) throw new Error("TTS request failed");
+        const reader = res.body!.getReader();
+        readerRef.current = reader;
+        const chunks: Uint8Array[] = [];
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          chunks.push(value);
+        }
+        const total = chunks.reduce((n, c) => n + c.length, 0);
+        const merged = new Uint8Array(total);
+        let offset = 0;
+        for (const c of chunks) {
+          merged.set(c, offset);
+          offset += c.length;
+        }
+        const audioBuffer = await ctx.decodeAudioData(merged.buffer);
+        const source = ctx.createBufferSource();
+        source.buffer = audioBuffer;
+        source.connect(ctx.destination);
+        sourceRef.current = source;
+        source.onended = () => setState("idle");
+        setState("playing");
+        source.start();
+      } catch (e) {
+        console.error("TTS error", e);
+        setState("idle");
+      }
+    },
+    [stop],
+  );
+
+  return { state, play, stop };
+}
+
+// ── Typewriter placeholder ─────────────────────────────────────────────────
+const PLACEHOLDERS = [
+  "Describe your startup idea…",
+  "What is your next feature?",
+  "What would you like to A/B test?",
+  "What problem are you solving?",
+  "What's your go-to-market hypothesis?",
+];
+
+function useTypewriterPlaceholder() {
+  const [displayed, setDisplayed] = useState('');
+  const [phraseIdx, setPhraseIdx] = useState(0);
+  const [typing, setTyping] = useState(true);
+  const [paused, setPaused] = useState(false);
+
+  useEffect(() => {
+    const phrase = PLACEHOLDERS[phraseIdx];
+
+    if (paused) {
+      const id = setTimeout(() => { setPaused(false); setTyping(false); }, 1600);
+      return () => clearTimeout(id);
+    }
+
+    if (typing) {
+      if (displayed.length < phrase.length) {
+        const id = setTimeout(() => setDisplayed(phrase.slice(0, displayed.length + 1)), 55);
+        return () => clearTimeout(id);
+      } else {
+        setPaused(true);
+      }
+    } else {
+      if (displayed.length > 0) {
+        const id = setTimeout(() => setDisplayed(d => d.slice(0, -1)), 30);
+        return () => clearTimeout(id);
+      } else {
+        setPhraseIdx(i => (i + 1) % PLACEHOLDERS.length);
+        setTyping(true);
+      }
+    }
+  }, [displayed, typing, paused, phraseIdx]);
+
+  return displayed;
+}
+
+// ── Idea prompt bar ────────────────────────────────────────────────────────
+function IdeaPromptBar({
+  idea,
+  isOrchestrating,
+  onIdeaChange,
+  onRerun,
+}: {
+  idea: string;
+  isOrchestrating: boolean;
+  onIdeaChange: (v: string) => void;
+  onRerun: () => void;
+}) {
+  const [committed, setCommitted] = useState(idea);
+  const [focused, setFocused] = useState(false);
+  const changed = idea !== committed;
+  const handleRerun = () => {
+    setCommitted(idea);
+    onRerun();
   };
+  return (
+    <div
+      className={`idea-bar${focused ? " focused" : ""}${changed ? " changed" : ""}`}
+    >
+      <div style={{ flex: 1 }}>
+        <div className="idea-bar-label">Your Idea</div>
+        <textarea
+          value={idea}
+          onChange={(e) => onIdeaChange(e.target.value)}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
+          rows={2}
+          className="idea-bar-textarea"
+        />
+      </div>
+      <button
+        className="btn-primary"
+        onClick={handleRerun}
+        disabled={isOrchestrating || !idea.trim() || !changed}
+        style={{
+          opacity: !changed ? 0.35 : 1,
+          transition: "opacity 0.2s",
+          flexShrink: 0,
+          alignSelf: "center",
+        }}
+      >
+        {isOrchestrating ? (
+          <div className="spinner" style={{ width: 16, height: 16 }} />
+        ) : (
+          <ArrowRight size={15} />
+        )}
+        {isOrchestrating ? "Running…" : "Modify"}
+      </button>
+    </div>
+  );
+}
 
-  for (const line of lines) {
-    if (line.startsWith('## ')) {
-      pushSection();
-      currentTitle = line.replace('## ', '').trim();
-      currentLines = [];
-      continue;
-    }
-    if (line.startsWith('# ')) continue;
-    currentLines.push(line);
-  }
+// ── Donut chart ────────────────────────────────────────────────────────────
+function DonutChart({
+  value,
+  max,
+  label,
+}: {
+  value: number;
+  max: number;
+  label: string;
+}) {
+  const r = 36;
+  const circ = 2 * Math.PI * r;
+  const pct = max > 0 ? Math.min(value / max, 1) : 0;
+  const dash = pct * circ;
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 20 }}>
+      <div className="donut-ring">
+        <svg className="donut-svg" width="90" height="90" viewBox="0 0 90 90">
+          <circle
+            cx="45"
+            cy="45"
+            r={r}
+            fill="none"
+            stroke="var(--border)"
+            strokeWidth="8"
+          />
+          <circle
+            cx="45"
+            cy="45"
+            r={r}
+            fill="none"
+            stroke="var(--primary)"
+            strokeWidth="8"
+            strokeDasharray={`${dash} ${circ}`}
+            strokeLinecap="round"
+          />
+        </svg>
+        <div className="donut-center">
+          {value > 999 ? `${(value / 1000).toFixed(1)}k` : value}
+          <span>{label}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
 
-  pushSection();
-  return sections;
-};
-
-const escapeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-
-const extractMarkdownSection = (markdown: string, heading: string) => {
-  const escapedHeading = escapeRegex(heading);
-  const pattern = new RegExp(`## ${escapedHeading}[\\s\\S]*?(?=\\n## |$)`, 'i');
-  const match = markdown.match(pattern);
-  if (!match) return '';
-  return match[0].replace(new RegExp(`## ${escapedHeading}\\n?`, 'i'), '').trim();
-};
-
-const extractBulletItems = (markdown: string, heading: string, limit = 3) => {
-  const section = extractMarkdownSection(markdown, heading);
-  return section
-    .split('\n')
-    .map((line) => line.trim())
-    .filter((line) => line.startsWith('- '))
-    .map((line) => line.replace(/^- /, '').trim())
-    .slice(0, limit);
-};
-
-const extractNumber = (text: string) => {
-  const match = text.match(/(\d+(?:\.\d+)?(?:\s?[-–]\s?\d+(?:\.\d+)?)?\s?(?:%|x|B|M|K|bn|million|billion)?)/i);
-  return match?.[1] || '';
-};
-
-const extractShortLines = (text: string, limit = 3) => {
-  return text
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .filter((line) => !line.startsWith('#'))
-    .slice(0, limit);
-};
-
-const sentencePreview = (text: string, fallback: string, limit = 140) => {
-  const clean = text.replace(/[*_`>#-]/g, ' ').replace(/\s+/g, ' ').trim();
-  return clean ? clean.slice(0, limit) : fallback;
-};
-
-const extractScore = (markdown: string, heading: string) => {
-  const section = extractMarkdownSection(markdown, heading);
-  const num = section.match(/(\d{1,3})/);
-  return num ? Number(num[1]) : null;
-};
-
-const listify = (value: any, limit = 4) => {
-  if (Array.isArray(value)) return value.filter(Boolean).slice(0, limit);
-  if (typeof value === 'string') {
-    return value
-      .split(/[,;\n]/)
-      .map((item) => item.trim())
-      .filter(Boolean)
-      .slice(0, limit);
-  }
-  return [];
-};
-
-const summarizeInterview = (text: string) => {
-  const clean = text.replace(/[#*_`>-]/g, ' ').replace(/\s+/g, ' ').trim();
-  if (!clean) return 'Interview summary will appear as the response streams in.';
-  const sentences = clean
-    .split(/(?<=[.!?])\s+/)
-    .map((sentence) => sentence.trim())
-    .filter(Boolean);
-  return sentences.slice(0, 2).join(' ').slice(0, 220);
-};
-
-const splitPlaybackSegments = (text: string) => {
-  const paragraphs = text
-    .split(/\n{2,}/)
-    .map((part) => part.trim())
-    .filter(Boolean);
-  const segments = paragraphs.flatMap((paragraph) => {
-    const sentences = paragraph
-      .split(/(?<=[.!?])\s+/)
-      .map((sentence) => sentence.trim())
-      .filter(Boolean);
-    if (sentences.length <= 1) return [paragraph];
-    const grouped: string[] = [];
-    for (let i = 0; i < sentences.length; i += 2) {
-      grouped.push(sentences.slice(i, i + 2).join(' '));
-    }
-    return grouped;
-  });
-  return segments.length ? segments : (text.trim() ? [text.trim()] : []);
-};
-
-function App() {
-  const [idea, setIdea] = useState('');
-  const [analysisStage, setAnalysisStage] = useState<'idle' | 'refining' | 'awaiting_approval' | 'awaiting_research_approval' | 'analyzing'>('idle');
+// ── Main App ───────────────────────────────────────────────────────────────
+export default function App() {
+  const [idea, setIdea] = useState("");
   const [results, setResults] = useState<Record<string, string>>({});
-  const [status, setStatus] = useState<Record<string, 'pending' | 'running' | 'completed' | 'error'>>({});
+  const [status, setStatus] = useState<
+    Record<string, "pending" | "running" | "completed" | "error">
+  >({});
   const [tokens, setTokens] = useState<Record<string, number>>({});
   const [searches, setSearches] = useState<Record<string, any[]>>({});
-  const [, setUsage] = useState<any>(null);
-  const [activeTab, setActiveTab] = useState('refine');
+  const [activeTab, setActiveTab] = useState("overview");
+  const [darkMode, setDarkMode] = useState(
+    () => window.matchMedia("(prefers-color-scheme: dark)").matches,
+  );
+  const [agentTimestamps, setAgentTimestamps] = useState<
+    Record<string, { start: number; end?: number }>
+  >({});
   const [isOrchestrating, setIsOrchestrating] = useState(false);
-  const [interviews, setInterviews] = useState<InterviewEntry[]>([]);
-  const [selectedInterviewIndex, setSelectedInterviewIndex] = useState<number | null>(null);
+  const [interviews, setInterviews] = useState<any[]>([]);
+  const [interviewReport, setInterviewReport] = useState<string>('');
+  const [selectedInterviewIndex, setSelectedInterviewIndex] = useState<
+    number | null
+  >(null);
   const [isSimulating, setIsSimulating] = useState(false);
+  const interviewBuffers = useRef<Record<string, string>>({});
   const [globalError, setGlobalError] = useState<string | null>(null);
   const [sessions, setSessions] = useState<any[]>([]);
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
-  const [sectionReview, setSectionReview] = useState<SectionReviewState>({});
-  const [refiningSectionKey, setRefiningSectionKey] = useState<string | null>(null);
-  const [researchReview, setResearchReview] = useState<ResearchReviewState>({ market: '', competitors: '' });
-  const [refiningResearchKey, setRefiningResearchKey] = useState<'market' | 'competitors' | null>(null);
-  const [followUpQuestion, setFollowUpQuestion] = useState('');
-  const [askingFollowUp, setAskingFollowUp] = useState<string | null>(null);
-  const [visiblePlaybackCount, setVisiblePlaybackCount] = useState(0);
-  const [isPlaybackRunning, setIsPlaybackRunning] = useState(true);
-  const chatViewportRef = useRef<HTMLDivElement | null>(null);
-  
-  const totalTokens = Object.values(tokens).reduce((acc, val) => acc + val, 0);
-  const totalSearches = Object.values(searches).reduce((acc, val) => acc + (val?.length || 0), 0);
-  const refinementSections = parseRefinementSections(results['refine'] || '');
-  const reviewableSections = refinementSections.filter((section) => section.key !== 'checkpoint');
-  const acceptedSections = reviewableSections.filter(
-    (section) => sectionReview[section.key]?.decision === 'accepted'
-  ).length;
-  const flaggedSections = reviewableSections.filter(
-    (section) => sectionReview[section.key]?.decision === 'revise'
+  const [leftSection, setLeftSection] = useState<"pipeline" | "history">(
+    "pipeline",
   );
-  const allSectionsAccepted = reviewableSections.length > 0 && acceptedSections === reviewableSections.length;
-  const snapshotTitle = extractMarkdownSection(results['refine'] || '', 'Draft Pitch').split('. ')[0] || extractMarkdownSection(results['ui'] || '', 'Brand Vibe & Personality').split('. ')[0] || 'Product Interface Concept';
-  const snapshotHero = extractMarkdownSection(results['ui'] || '', 'The Hero Section') || extractMarkdownSection(results['refine'] || '', 'Solution') || 'A product concept preview generated from the current validation flow.';
-  const snapshotCore = extractMarkdownSection(results['ui'] || '', 'Core App Experience') || extractMarkdownSection(results['ux'] || '', 'The Path to Value') || 'Core workflow preview unavailable yet.';
-  const snapshotChips = [
-    ...extractBulletItems(results['refine'] || '', 'Why It Wins', 2),
-    ...extractBulletItems(results['ux'] || '', 'Key Feature Roadmap (MoSCoW - simplified for humans)', 2),
-  ].slice(0, 3);
-  const marketTam = extractMarkdownSection(results['market'] || '', 'Market Size & TAM');
-  const marketTrajectory = extractMarkdownSection(results['market'] || '', 'Trends & Trajectory');
-  const marketOpportunities = extractBulletItems(results['market'] || '', 'Opportunities', 4);
-  const marketRisks = extractBulletItems(results['market'] || '', 'Risks', 4);
-  const competitorOverview = extractMarkdownSection(results['competitors'] || '', 'Competitive Landscape Overview');
-  const competitorGaps = extractBulletItems(results['competitors'] || '', 'Positioning Gaps', 4);
-  const competitorDifferentiation = extractBulletItems(results['competitors'] || '', 'Differentiation Opportunities', 4);
-  const uxWorld = extractMarkdownSection(results['ux'] || '', "The User's World (Before this product)");
-  const uxDiscovery = extractMarkdownSection(results['ux'] || '', 'The Discovery Moment (How they find it)');
-  const uxFirst30 = extractMarkdownSection(results['ux'] || '', "The 'First 30 Seconds' (The onboarding experience)");
-  const uxPath = extractMarkdownSection(results['ux'] || '', 'The Path to Value (How they solve their problem step-by-step)');
-  const uxCoreLoop = extractMarkdownSection(results['ux'] || '', 'The Core Loop (What keeps them coming back)');
-  const uxEmotionalArc = extractMarkdownSection(results['ux'] || '', 'Emotional Arc (How the user feels at each stage)');
-  const uxRoadmap = extractBulletItems(results['ux'] || '', 'Key Feature Roadmap (MoSCoW - simplified for humans)', 5);
-  const scoreValue = extractScore(results['scoring'] || '', 'OVERALL VALIDATION SCORE: [Insert Score 0-100 here]') ?? extractScore(results['scoring'] || '', 'Visibility Score (0-100)');
-  const verdictText = extractMarkdownSection(results['scoring'] || '', 'The Verdict: [GO / PIVOT / NO-GO]');
-  const scoreRisks = extractBulletItems(results['scoring'] || '', 'Key Risks & Warning Signs', 4);
-  const scoreNextSteps = extractBulletItems(results['scoring'] || '', 'Critical Next Steps', 4);
-  const visibilityScore = extractScore(results['visibility'] || '', 'Visibility Score (0-100)');
-  const visibilitySummary = extractMarkdownSection(results['visibility'] || '', 'How AI Models (ChatGPT, Claude, etc.) Describe This Concept');
-  const visibilityCompetition = extractMarkdownSection(results['visibility'] || '', 'Competitive Visibility Landscape');
-  const visibilityRecommendations = extractBulletItems(results['visibility'] || '', 'SEO vs. GEO Optimization Recommendations', 4);
-  const completedInterviewCount = interviews.filter((entry) => entry.is_complete).length;
-  const activeInterview = interviews.find((entry) => entry.status === 'interviewing') || null;
-  const selectedInterview = selectedInterviewIndex !== null ? interviews[selectedInterviewIndex] || null : null;
-  const selectedPainPoints = listify(selectedInterview?.user.context?.pain_points, 4);
-  const selectedSummary = summarizeInterview(selectedInterview?.response || '');
-  const playbackMessages = selectedInterview
-    ? [
-        {
-          key: 'intro',
-          role: 'agent' as const,
-          speaker: 'FounderSignal',
-          text: 'Walk me through your honest reaction to this product, the market story behind it, and whether you would actually trust it enough to try or buy.',
-        },
-        ...splitPlaybackSegments(selectedInterview.response || '').map((text, index) => ({
-          key: `main-${index}`,
-          role: 'persona' as const,
-          speaker: selectedInterview.user.name,
-          text,
-        })),
-        ...((selectedInterview.followUps || []).flatMap((item, index) => {
-          const answerSegments = splitPlaybackSegments(item.answer || '');
-          return [
-            {
-              key: `q-${index}`,
-              role: 'user' as const,
-              speaker: 'You',
-              text: item.question,
-            },
-            ...answerSegments.map((text, answerIndex) => ({
-              key: `a-${index}-${answerIndex}`,
-              role: 'persona' as const,
-              speaker: selectedInterview.user.name,
-              text,
-            })),
-          ];
-        }) || []),
-      ]
-    : [];
+  const [searchQuery, setSearchQuery] = useState("");
+  const tts = useTTS();
+
+  const totalTokens = Object.values(tokens).reduce((a, v) => a + v, 0);
+  const totalSearches = Object.values(searches).reduce(
+    (a, v) => a + (v?.length || 0),
+    0,
+  );
+  const hasResults = Object.keys(results).length > 0;
+
+  useEffect(() => {
+    document.documentElement.setAttribute(
+      "data-theme",
+      darkMode ? "dark" : "light",
+    );
+  }, [darkMode]);
 
   useEffect(() => {
     fetchSessions();
   }, []);
 
-  useEffect(() => {
-    setVisiblePlaybackCount(0);
-    setIsPlaybackRunning(true);
-  }, [selectedInterview?.user.name]);
-
-  useEffect(() => {
-    if (!selectedInterview || playbackMessages.length === 0) return;
-    if (!isPlaybackRunning) return;
-    if (visiblePlaybackCount >= playbackMessages.length) return;
-
-    const timer = window.setTimeout(() => {
-      setVisiblePlaybackCount((count) => Math.min(count + 1, playbackMessages.length));
-    }, visiblePlaybackCount === 0 ? 250 : 700);
-
-    return () => window.clearTimeout(timer);
-  }, [selectedInterview, playbackMessages.length, visiblePlaybackCount, isPlaybackRunning]);
-
-  useEffect(() => {
-    if (!chatViewportRef.current) return;
-    chatViewportRef.current.scrollTop = chatViewportRef.current.scrollHeight;
-  }, [visiblePlaybackCount, playbackMessages.length]);
-
-  const getHeaders = () => {
-    return {
-      'Content-Type': 'application/json'
-    };
-  };
-
-
-
+  // ── Data fetchers ────────────────────────────────────────────────────────
   const fetchSessions = async () => {
     try {
-      const res = await fetch('http://localhost:8000/api/v1/agents/sessions', {
-        headers: getHeaders()
-      });
-
-
-      const data = await res.json();
-      setSessions(data);
-    } catch (e) {
-      console.error('Failed to fetch sessions', e);
-    }
+      const r = await fetch("http://localhost:8000/api/v1/agents/sessions");
+      setSessions(await r.json());
+    } catch {}
   };
 
   const loadSession = async (sessionId: string) => {
     try {
-      const res = await fetch(`http://localhost:8000/api/v1/agents/sessions/${sessionId}`, {
-        headers: getHeaders()
-      });
-
-
-      const data = await res.json();
-      
-      // Hydrate state
-      setIdea(data.input.idea);
-      setCurrentSessionId(data.report_id);
-      
-      // Hydrate idea
-      if (data.idea) setIdea(data.idea);
-      else if (data.input?.idea) setIdea(data.input.idea);
-
-      setResults(data.results_map || {}); 
-      setStatus(data.status_map || {});
-      setTokens(data.tokens_map || {});
-      setSearches(data.searches_map || {});
-      setInterviews(data.interviews || []);
-      const hasRefinement = (data.status_map || {}).refine === 'completed';
-      const hasResearchCheckpoint =
-        hasRefinement &&
-        (data.status_map || {}).market === 'completed' &&
-        (data.status_map || {}).competitors === 'completed' &&
-        !['ux', 'ui', 'visibility', 'scoring'].some((key) => (data.status_map || {})[key] === 'completed');
-      const hasOnlyRefinement =
-        hasRefinement &&
-        !['market', 'competitors', 'ux', 'ui', 'visibility', 'scoring'].some((key) => (data.status_map || {})[key] === 'completed');
-      const inferredStage = data.analysis_stage || (
-        hasResearchCheckpoint
-          ? 'awaiting_research_approval'
-          : hasOnlyRefinement
-            ? 'awaiting_approval'
-            : 'idle'
+      const r = await fetch(
+        `http://localhost:8000/api/v1/agents/sessions/${sessionId}`,
       );
-      setAnalysisStage(inferredStage);
-      setSectionReview(data.refinement_review || {});
-      setActiveTab(inferredStage === 'awaiting_research_approval' ? 'market' : hasRefinement ? 'refine' : 'overview');
-
-      setIsSidebarOpen(false);
-    } catch (e) {
-      console.error('Failed to load session', e);
-    }
+      const d = await r.json();
+      setIdea(d.input.idea);
+      setCurrentSessionId(d.report_id);
+      setResults(d.results_map || {});
+      setStatus(d.status_map || {});
+      setTokens(d.tokens_map || {});
+      setSearches(d.searches_map || {});
+      setActiveTab("overview");
+    } catch {}
   };
 
-  const saveCurrentSession = async (finalResults: any, finalStatus: any, finalTokens: any, finalSearches: any, finalInterviews?: any[], stageOverride?: string) => {
+  const saveCurrentSession = async (r: any, s: any, t: any, se: any) => {
     try {
-      const reportId = currentSessionId || Math.random().toString(36).substring(7);
-      
-      // Generate a short title from the idea
-      const title = idea.length > 40 ? idea.substring(0, 40) + '...' : idea;
-
-      const payload = {
-        report_id: reportId,
-        idea: idea, // keeping 'idea' for backwards compat or internal use
-        title: title,
-        input: { idea },
-        results_map: finalResults,
-        status_map: finalStatus,
-        tokens_map: finalTokens,
-        searches_map: finalSearches,
-        analysis_stage: stageOverride || analysisStage,
-        refinement_review: sectionReview,
-        interviews: finalInterviews || interviews,
-        created_at: new Date().toISOString()
-      };
-
-
-      
-      await fetch('http://localhost:8000/api/v1/agents/sessions/save', {
-        method: 'POST',
-        headers: getHeaders(),
-        body: JSON.stringify(payload)
+      const id = currentSessionId || Math.random().toString(36).slice(7);
+      await fetch("http://localhost:8000/api/v1/agents/sessions/save", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          report_id: id,
+          input: { idea },
+          results_map: r,
+          status_map: s,
+          tokens_map: t,
+          searches_map: se,
+          created_at: new Date().toISOString(),
+        }),
       });
-
-
-      
-      setCurrentSessionId(reportId);
+      setCurrentSessionId(id);
       fetchSessions();
     } catch {}
   };
@@ -432,40 +378,20 @@ function App() {
     setAgentTimestamps((p) => ({ ...p, [agentId]: { start: Date.now() } }));
     setResults((p) => ({ ...p, [agentId]: "" }));
     try {
-      const res = await fetch('http://localhost:8000/api/v1/agents/usage', {
-        headers: getHeaders()
-      });
-
-
-      const data = await res.json();
-      setUsage(data);
-    } catch (e) {
-      console.error('Failed to fetch usage', e);
-    }
-  };
-
-  const streamAgent = async (agentId: string, payload: any): Promise<string> => {
-    setStatus(prev => ({ ...prev, [agentId]: 'running' }));
-    setResults(prev => ({ ...prev, [agentId]: '' }));
-
-    try {
-      const response = await fetch(`http://localhost:8000/api/v1/agents${AGENTS.find(a => a.id === agentId)?.endpoint}`, {
-        method: 'POST',
-        headers: getHeaders(),
-        body: JSON.stringify(payload),
-      });
-
-
-
-      if (!response.ok) throw new Error(`Agent ${agentId} failed`);
-
-      const reader = response.body?.getReader();
-      if (!reader) throw new Error('No reader');
-
-      const decoder = new TextDecoder();
-      let fullContent = '';
-      let buffer = '';
-
+      const res = await fetch(
+        `http://localhost:8000/api/v1/agents${AGENTS.find((a) => a.id === agentId)?.endpoint}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        },
+      );
+      if (!res.ok) throw new Error(`Agent ${agentId} failed`);
+      const reader = res.body?.getReader();
+      if (!reader) throw new Error("No reader");
+      const dec = new TextDecoder();
+      let full = "",
+        buf = "";
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -504,41 +430,34 @@ function App() {
     }
   };
 
-  const updateResearchReview = (key: 'market' | 'competitors', value: string) => {
-    setResearchReview((prev) => ({ ...prev, [key]: value }));
-  };
-
   const startInterviews = async () => {
     if (isSimulating) return;
     setIsSimulating(true);
     setInterviews([]);
-    setSelectedInterviewIndex(null);
-    setActiveTab('interviews');
-    let latestInterviews: InterviewEntry[] = [];
-
+    setInterviewReport('');
+    interviewBuffers.current = {};
     try {
-      const response = await fetch('http://localhost:8000/api/v1/agents/interviews', {
-        method: 'POST',
-        headers: getHeaders(),
-        body: JSON.stringify({ 
-          refined_idea: results['refine'],
-          market_research: results['market'],
-          competitors: results['competitors'],
-          ux: results['ux'],
-          ui: results['ui'],
-          visibility: results['visibility'],
-          scoring: results['scoring']
-        }),
-      });
-
-      if (!response.ok) throw new Error('Simulation failed');
-
-      const reader = response.body?.getReader();
-      if (!reader) throw new Error('No reader');
-
-      const decoder = new TextDecoder();
-      let buffer = '';
-
+      const res = await fetch(
+        "http://localhost:8000/api/v1/agents/interviews",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            refined_idea: results["refine"],
+            market_research: results["market"],
+            competitors: results["competitors"],
+            ux: results["ux"],
+            ui: results["ui"],
+            visibility: results["visibility"],
+            scoring: results["scoring"],
+          }),
+        },
+      );
+      if (!res.ok) throw new Error("Simulation failed");
+      const reader = res.body?.getReader();
+      if (!reader) throw new Error("No reader");
+      const dec = new TextDecoder();
+      let buf = "";
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -546,47 +465,24 @@ function App() {
         const lines = buf.split("\n\n");
         buf = lines.pop() || "";
         for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const data = JSON.parse(line.replace('data: ', ''));
-            
-            if (data.user) {
-              setInterviews(prev => {
-                const existing = prev.findIndex(i => i.user.name === data.user.name);
-                const nextStatus: InterviewStatus = data.is_complete
-                  ? 'complete'
-                  : data.event === 'persona_created'
-                    ? 'ready'
-                    : data.chunk
-                      ? 'interviewing'
-                      : 'building';
-
-                if (existing >= 0) {
-                  const updated = [...prev];
-                  updated[existing] = {
-                    ...updated[existing],
-                    user: data.user,
-                    response: data.response || `${updated[existing].response}${data.chunk || ''}`,
-                    is_complete: Boolean(data.is_complete),
-                    status: nextStatus,
-                    focus_points: data.focus_points || updated[existing].focus_points || [],
-                    research_highlights: data.research_highlights || updated[existing].research_highlights,
-                  };
-                  latestInterviews = updated;
-                  return updated;
-                } else {
-                  if (prev.length === 0) setSelectedInterviewIndex(0);
-                  latestInterviews = [
-                    ...prev,
-                    {
-                      user: data.user,
-                      response: data.response || data.chunk || '',
-                      is_complete: Boolean(data.is_complete),
-                      status: nextStatus,
-                      focus_points: data.focus_points || [],
-                      research_highlights: data.research_highlights,
-                    },
-                  ];
-                  return latestInterviews;
+          if (!line.startsWith("data: ")) continue;
+          const d = JSON.parse(line.slice(6));
+          if (d.is_report) {
+            if (d.report_chunk) setInterviewReport(r => r + d.report_chunk);
+          } else if (d.user) {
+            const uname = d.user.context?.name || d.user.name;
+            if (d.chunk) {
+              interviewBuffers.current[uname] =
+                (interviewBuffers.current[uname] || "") + d.chunk;
+              const acc = interviewBuffers.current[uname];
+              setInterviews((prev) => {
+                const idx = prev.findIndex(
+                  (i) => (i.user.context?.name || i.user.name) === uname,
+                );
+                if (idx >= 0) {
+                  const u = [...prev];
+                  u[idx] = { ...u[idx], response: acc };
+                  return u;
                 }
                 if (prev.length === 0) setSelectedInterviewIndex(0);
                 return [
@@ -615,448 +511,79 @@ function App() {
       setGlobalError(e.message);
     } finally {
       setIsSimulating(false);
-      saveCurrentSession(results, status, tokens, searches, latestInterviews.length ? latestInterviews : interviews);
     }
   };
 
-  const askSelectedInterviewQuestion = async () => {
-    if (!selectedInterview || !followUpQuestion.trim() || askingFollowUp) return;
-
-    const question = followUpQuestion.trim();
-    setAskingFollowUp(selectedInterview.user.name);
-    setFollowUpQuestion('');
-
-    setInterviews((prev) =>
-      prev.map((entry) =>
-        entry.user.name === selectedInterview.user.name
-          ? {
-              ...entry,
-              followUps: [...(entry.followUps || []), { question, answer: '', isStreaming: true }],
-            }
-          : entry,
-      ),
-    );
-
-    try {
-      const response = await fetch('http://localhost:8000/api/v1/agents/interviews/follow-up', {
-        method: 'POST',
-        headers: getHeaders(),
-        body: JSON.stringify({
-          user: selectedInterview.user,
-          question,
-          prior_response: selectedInterview.response,
-          refined_idea: results['refine'],
-          market_research: results['market'],
-          competitors: results['competitors'],
-          ux: results['ux'],
-          ui: results['ui'],
-          visibility: results['visibility'],
-          scoring: results['scoring'],
-        }),
-      });
-
-      if (!response.ok) throw new Error('Follow-up question failed');
-      const reader = response.body?.getReader();
-      if (!reader) throw new Error('No reader');
-
-      const decoder = new TextDecoder();
-      let buffer = '';
-      let latestInterviews = interviews;
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n\n');
-        buffer = lines.pop() || '';
-
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue;
-          const data = JSON.parse(line.replace('data: ', ''));
-          if (data.error) throw new Error(data.error);
-          if (!data.user || data.question !== question) continue;
-
-          setInterviews((prev) => {
-            const updated = prev.map((entry) => {
-              if (entry.user.name !== data.user.name) return entry;
-              const followUps = [...(entry.followUps || [])];
-              const targetIndex = followUps.findIndex((item) => item.question === question && item.isStreaming !== false);
-              if (targetIndex >= 0) {
-                followUps[targetIndex] = {
-                  ...followUps[targetIndex],
-                  answer: data.response || `${followUps[targetIndex].answer}${data.chunk || ''}`,
-                  isStreaming: !data.is_complete,
-                };
-              }
-              return { ...entry, followUps };
-            });
-            latestInterviews = updated;
-            return updated;
-          });
-        }
-      }
-
-      await saveCurrentSession(results, status, tokens, searches, latestInterviews);
-    } catch (e: any) {
-      console.error('Follow-up question error', e);
-      setGlobalError(e.message || 'Failed to ask follow-up question.');
-    } finally {
-      setAskingFollowUp(null);
-    }
-  };
-
-  const togglePlayback = () => {
-    if (!selectedInterview) return;
-    if (visiblePlaybackCount >= playbackMessages.length) {
-      setVisiblePlaybackCount(0);
-      setIsPlaybackRunning(true);
-      return;
-    }
-    setIsPlaybackRunning((current) => !current);
-  };
-
-
-  const startRefinement = async () => {
-    if (isOrchestrating) return;
-    if (!idea.trim()) return;
-    
+  const startAnalysis = async () => {
+    if (isOrchestrating || !idea.trim()) return;
     setIsOrchestrating(true);
-    setAnalysisStage('refining');
     setResults({});
     setStatus({});
     setTokens({});
     setSearches({});
-    setSectionReview({});
+    setInterviews([]);
+    setInterviewReport('');
+    setSelectedInterviewIndex(null);
+    setAgentTimestamps({});
+    setActiveTab("overview");
     setGlobalError(null);
-    
-    const localResults: Record<string, string> = {};
-    const localStatus: Record<string, string> = {};
-
     try {
-      const runStage = async (id: string, params: any) => {
-        localStatus[id] = 'running';
-        setStatus(prev => ({...prev, [id]: 'running'}));
-        const text = await streamAgent(id, params);
-        localResults[id] = text;
-        localStatus[id] = 'completed';
-        setResults(prev => ({...prev, [id]: text}));
-        setStatus(prev => ({...prev, [id]: 'completed'}));
-        return text;
-      };
-
-      // 1. Refine only
-      await runStage('refine', { idea });
-      setAnalysisStage('awaiting_approval');
-      setSectionReview({});
-      setActiveTab('refine');
-      
-      // Save partial results
-      await saveCurrentSession(localResults, localStatus, tokens, searches, interviews, 'awaiting_approval');
-      
-    } catch (err: any) {
-      console.error('Refinement failed:', err);
-      setGlobalError(err.message || 'Failed to refine idea.');
-      setAnalysisStage('idle');
-    } finally {
-      setIsOrchestrating(false);
-    }
-  };
-
-  const continueAnalysis = async () => {
-    if (isOrchestrating) return;
-    if (analysisStage === 'awaiting_approval' && !results['refine']) {
-      setGlobalError('Complete idea refinement before continuing.');
-      return;
-    }
-    if (analysisStage === 'awaiting_approval' && !allSectionsAccepted) {
-      setGlobalError('Accept each refined idea section before continuing to research.');
-      return;
-    }
-    setIsOrchestrating(true);
-    setAnalysisStage('analyzing');
-    setGlobalError(null);
-
-    const localResults = { ...results };
-    const localStatus = { ...status };
-    const refinedText = results['refine'];
-
-    try {
-      const runStage = async (id: string, params: any) => {
-        localStatus[id] = 'running';
-        setStatus(prev => ({...prev, [id]: 'running'}));
-        const text = await streamAgent(id, params);
-        localResults[id] = text;
-        localStatus[id] = 'completed';
-        setResults(prev => ({...prev, [id]: text}));
-        setStatus(prev => ({...prev, [id]: 'completed'}));
-        return text;
-      };
-
-      if (analysisStage === 'awaiting_approval') {
-        await Promise.all([
-          runStage('market', { refined_idea: refinedText }),
-          runStage('competitors', { refined_idea: refinedText })
-        ]);
-
-        await fetchUsage();
-        setAnalysisStage('awaiting_research_approval');
-        setActiveTab('market');
-        await saveCurrentSession(localResults, localStatus, tokens, searches, interviews, 'awaiting_research_approval');
-      } else {
-        const marketText = localResults['market'] || results['market'];
-        const compText = localResults['competitors'] || results['competitors'];
-
-        const [uxText] = await Promise.all([
-          runStage('ux', { refined_idea: refinedText, market_research: marketText }),
-          runStage('scoring', { refined_idea: refinedText, market_research: marketText, competitor_research: compText })
-        ]);
-
-        await new Promise(r => setTimeout(r, 500));
-        
-        await runStage('visibility', { refined_idea: refinedText, competitor_research: compText });
-        await runStage('ui', { refined_idea: refinedText, ux_flow: uxText });
-
-        await fetchUsage();
-        await saveCurrentSession(localResults, localStatus, tokens, searches, interviews, 'idle');
-        setAnalysisStage('idle');
-      }
-      
-    } catch (err: any) {
-      console.error('Analysis failed:', err);
-      setGlobalError(err.message || 'Failed to complete analysis.');
-    } finally {
-      setIsOrchestrating(false);
-    }
-  };
-
-  const updateSectionDecision = (sectionKey: string, decision: SectionDecision) => {
-    setSectionReview((prev) => ({
-      ...prev,
-      [sectionKey]: {
-        decision,
-        notes: decision === 'accepted' ? '' : prev[sectionKey]?.notes || ''
-      }
-    }));
-  };
-
-  const updateSectionNotes = (sectionKey: string, notes: string) => {
-    setSectionReview((prev) => ({
-      ...prev,
-      [sectionKey]: {
-        decision: prev[sectionKey]?.decision || 'revise',
-        notes
-      }
-    }));
-  };
-
-  const runRefinementWithFeedback = async (feedback: string) => {
-    const text = await streamAgent('refine', { idea, feedback });
-    setResults((prev) => ({ ...prev, refine: text }));
-    setStatus((prev) => ({ ...prev, refine: 'completed' }));
-    setAnalysisStage('awaiting_approval');
-    setSectionReview({});
-    await saveCurrentSession(
-      { ...results, refine: text },
-      { ...status, refine: 'completed' },
-      tokens,
-      searches,
-      interviews
-    );
-  };
-
-  const rerunResearchAgent = async (agentId: 'market' | 'competitors') => {
-    if (isOrchestrating) return;
-
-    const feedback = researchReview[agentId].trim();
-    if (!feedback) {
-      setGlobalError(`Add a short edit request before refining ${agentId === 'market' ? 'market research' : 'competitor analysis'}.`);
-      return;
-    }
-
-    setIsOrchestrating(true);
-    setAnalysisStage('awaiting_research_approval');
-    setRefiningResearchKey(agentId);
-    setGlobalError(null);
-
-    try {
-      const text = await streamAgent(agentId, {
-        refined_idea: results['refine'],
-        feedback,
+      const refined = await streamAgent("refine", { idea });
+      await new Promise((r) => setTimeout(r, 500));
+      const [market, comp] = await Promise.all([
+        streamAgent("market", { refined_idea: refined }),
+        streamAgent("competitors", { refined_idea: refined }),
+      ]);
+      const [ux] = await Promise.all([
+        streamAgent("ux", { refined_idea: refined, market_research: market }),
+        streamAgent("scoring", {
+          refined_idea: refined,
+          market_research: market,
+          competitor_research: comp,
+        }),
+      ]);
+      await new Promise((r) => setTimeout(r, 500));
+      await streamAgent("visibility", {
+        refined_idea: refined,
+        competitor_research: comp,
       });
-      const nextResults = { ...results, [agentId]: text };
-      const nextStatus: Record<string, 'pending' | 'running' | 'completed' | 'error'> = {
-        ...status,
-        [agentId]: 'completed',
-      };
-      setResults(nextResults);
-      setStatus(nextStatus);
-      setResearchReview((prev) => ({ ...prev, [agentId]: '' }));
-      await saveCurrentSession(nextResults, nextStatus, tokens, searches, interviews, 'awaiting_research_approval');
-    } catch (err: any) {
-      console.error(`Failed to rerun ${agentId}:`, err);
-      setGlobalError(err.message || `Failed to refine ${agentId}.`);
-    } finally {
-      setIsOrchestrating(false);
-      setRefiningResearchKey(null);
-    }
-  };
-
-  const refineSingleSection = async (sectionTitle: string, sectionKey: string) => {
-    if (isOrchestrating) return;
-
-    const notes = sectionReview[sectionKey]?.notes?.trim();
-    if (!notes) {
-      setGlobalError(`Add a short edit request for "${sectionTitle}" before sending refinement.`);
-      return;
-    }
-
-    setIsOrchestrating(true);
-    setAnalysisStage('refining');
-    setRefiningSectionKey(sectionKey);
-    setGlobalError(null);
-
-    try {
-      const acceptedTitles = reviewableSections
-        .filter((section) => sectionReview[section.key]?.decision === 'accepted')
-        .map((section) => section.title);
-      const feedback = [
-        `Revise only the "${sectionTitle}" section.`,
-        'Keep the rest of the document stable unless this change requires a small alignment update.',
-        acceptedTitles.length > 0 ? `Already accepted sections to preserve: ${acceptedTitles.join(', ')}` : '',
-        `Edit request for "${sectionTitle}": ${notes}`,
-        'The user may want to add details, remove claims, tighten wording, or change scope. Apply the request directly and return the full revised checkpoint document.'
-      ]
-        .filter(Boolean)
-        .join('\n');
-
-      await runRefinementWithFeedback(feedback);
-    } catch (err: any) {
-      console.error('Single section refinement failed:', err);
-      setGlobalError(err.message || `Failed to refine "${sectionTitle}".`);
-      setAnalysisStage('awaiting_approval');
-    } finally {
-      setIsOrchestrating(false);
-      setRefiningSectionKey(null);
-    }
-  };
-
-  const refineFlaggedSections = async () => {
-    if (isOrchestrating) return;
-    if (flaggedSections.length === 0) {
-      setGlobalError('Flag at least one section for revision first.');
-      return;
-    }
-
-    setIsOrchestrating(true);
-    setAnalysisStage('refining');
-    setGlobalError(null);
-
-    try {
-      const acceptedTitles = reviewableSections
-        .filter((section) => sectionReview[section.key]?.decision === 'accepted')
-        .map((section) => section.title);
-      const feedback = [
-        'Revise only the flagged sections below.',
-        'Keep accepted sections aligned unless the requested revisions require a small adjustment.',
-        acceptedTitles.length > 0 ? `Accepted sections to preserve where possible: ${acceptedTitles.join(', ')}` : '',
-        ...flaggedSections.map((section) => {
-          const notes = sectionReview[section.key]?.notes?.trim() || 'Make this section clearer and easier to approve.';
-          return `- ${section.title}: ${notes}`;
-        })
-      ]
-        .filter(Boolean)
-        .join('\n');
-
-      await runRefinementWithFeedback(feedback);
-    } catch (err: any) {
-      console.error('Section refinement failed:', err);
-      setGlobalError(err.message || 'Failed to refine the flagged sections.');
-      setAnalysisStage('awaiting_approval');
+      await streamAgent("ui", { refined_idea: refined, ux_flow: ux });
+      await saveCurrentSession(results, status, tokens, searches);
+    } catch (e: any) {
+      setGlobalError(e.message || "Pipeline interrupted.");
     } finally {
       setIsOrchestrating(false);
     }
   };
 
-  return (
-    <div style={{ display: 'flex', height: '100vh', width: '100vw', overflow: 'hidden' }}>
-      {/* Session History Sidebar */}
-      <div 
-        style={{ 
-          width: isSidebarOpen ? '320px' : '0px', 
-          background: 'white', 
-          borderRight: isSidebarOpen ? '1px solid #f1f5f9' : 'none',
-          transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-          position: 'relative',
-          display: 'flex',
-          flexDirection: 'column',
-          zIndex: 50
-        }}
-      >
-        <div style={{ padding: '24px', borderBottom: '1px solid #f1f5f9', opacity: isSidebarOpen ? 1 : 0 }}>
-           <h3 style={{ margin: 0, fontSize: '1.1rem' }}>Project History</h3>
-        </div>
-        
-         <div style={{ flex: 1, overflowY: 'auto', padding: '12px', opacity: isSidebarOpen ? 1 : 0 }}>
-           {sessions.length === 0 ? (
-             <div style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--text-secondary)' }}>
-                <Clock size={32} style={{ margin: '0 auto 16px', opacity: 0.3 }} />
-                <p style={{ fontSize: '0.85rem' }}>Your history is empty.</p>
-             </div>
-           ) : (
-             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                {sessions.map(s => (
-                  <div 
-                    key={s.id} 
-                    onClick={() => loadSession(s.id)}
-                    style={{ 
-                      padding: '16px', 
-                      borderRadius: '12px', 
-                      background: currentSessionId === s.id ? 'var(--accent-glow)' : '#f8fafc',
-                      cursor: 'pointer',
-                      border: `1px solid ${currentSessionId === s.id ? 'var(--accent)' : 'transparent'}`,
-                      transition: 'all 0.2s'
-                    }}
-                  >
-                    <div style={{ fontWeight: 600, fontSize: '0.85rem', marginBottom: '4px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                       {s.title || s.idea || s.input?.idea || 'Untitled Project'}
-                    </div>
+  // ── Landing ──────────────────────────────────────────────────────────────
+  const placeholder = useTypewriterPlaceholder();
 
-                    <div className="flex-between">
-                       <span style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>
-                         {new Date(s.created_at).toLocaleDateString()}
-                       </span>
-                       {s.score && <span className="badge success">{s.score}</span>}
-                    </div>
-                  </div>
-                ))}
-             </div>
-           )}
-        </div>
-
-        {/* Sidebar Toggle Handle */}
-
-        <div 
-          onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-          style={{ 
-            position: 'absolute', 
-            right: '-32px', 
-            top: '50%', 
-            transform: 'translateY(-50%)',
-            background: 'white',
-            width: '32px',
-            height: '64px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            cursor: 'pointer',
-            border: '1px solid #f1f5f9',
-            borderLeft: 'none',
-            borderRadius: '0 12px 12px 0',
-            boxShadow: '4px 0 12px rgba(0,0,0,0.05)'
-          }}
-        >
-          {isSidebarOpen ? <ChevronLeft size={18} /> : <Clock size={18} />}
+  if (!hasResults && !isOrchestrating) {
+    return (
+      <div className="landing">
+        <div className="landing-card">
+          <div className="landing-icon">
+            <Zap size={26} />
+          </div>
+          <h1 className="landing-title">FounderSignal</h1>
+          <p className="landing-sub">
+            Get market signals even before hitting the market.
+          </p>
+          <textarea
+            value={idea}
+            onChange={(e) => setIdea(e.target.value)}
+            placeholder={placeholder}
+            rows={4}
+            className="landing-textarea"
+          />
+          <button
+            className="btn-primary btn-full"
+            onClick={startAnalysis}
+            disabled={!idea.trim()}
+          >
+            <TrendingUp size={18} /> Get Signals
+          </button>
         </div>
       </div>
     );
@@ -1104,37 +631,55 @@ function App() {
           <span className="nav-brand-name">FounderSignal</span>
         </div>
 
-        {(!isOrchestrating && Object.keys(results).length === 0) ? (
-          <div className="landing-hero fade-in">
-            <div style={{ maxWidth: '800px', margin: '0 auto', textAlign: 'center' }}>
-              <div className="flex-center" style={{ marginBottom: '32px' }}>
-                <div className="tile-icon" style={{ width: '64px', height: '64px', background: 'var(--accent)', color: 'white' }}>
-                  <Zap size={32} />
-                </div>
-              </div>
-              <h1 style={{ fontSize: '3.5rem', marginBottom: '16px', fontWeight: 800 }}>FounderSignal</h1>
-              <p style={{ fontSize: '1.25rem', color: 'var(--text-secondary)', marginBottom: '48px' }}>
-                Validate your startup idea with a multi-agent AI research pipeline.
-              </p>
-
-              <div className="glass-panel" style={{ padding: '40px' }}>
-                <textarea 
-                  value={idea}
-                  onChange={(e) => setIdea(e.target.value)}
-                  placeholder="Paste your raw startup idea here..."
-                  style={{ width: '100%', height: '150px', marginBottom: '24px', fontSize: '1.1rem' }}
-                />
-                <button 
-                  className="btn-primary" 
-                  onClick={startRefinement}
-                  disabled={isOrchestrating || !idea.trim()}
-                  style={{ width: '100%', padding: '16px', fontSize: '1.1rem' }}
-                >
-                  {isOrchestrating ? <div className="spinner" style={{ width: '20px', height: '20px' }}></div> : <Sparkles size={20} />}
-                  {isOrchestrating ? 'Refining Idea...' : 'Start With Idea Refinement'}
-                </button>
-              </div>
-            </div>
+        <div className="nav-body">
+          {/* section toggle */}
+          <div style={{ display: "flex", gap: 4, marginBottom: 10 }}>
+            <button
+              className={`btn-ghost${leftSection === "pipeline" ? "" : ""}`}
+              onClick={() => setLeftSection("pipeline")}
+              style={{
+                flex: 1,
+                justifyContent: "center",
+                fontSize: "0.76rem",
+                background:
+                  leftSection === "pipeline"
+                    ? "var(--primary-light)"
+                    : "transparent",
+                color:
+                  leftSection === "pipeline"
+                    ? "var(--primary)"
+                    : "var(--text-secondary)",
+                borderColor:
+                  leftSection === "pipeline"
+                    ? "var(--primary-border)"
+                    : "var(--border)",
+              }}
+            >
+              <BarChart2 size={13} /> Pipeline
+            </button>
+            <button
+              className="btn-ghost"
+              onClick={() => setLeftSection("history")}
+              style={{
+                flex: 1,
+                justifyContent: "center",
+                fontSize: "0.76rem",
+                background:
+                  leftSection === "history"
+                    ? "var(--primary-light)"
+                    : "transparent",
+                color:
+                  leftSection === "history"
+                    ? "var(--primary)"
+                    : "var(--text-secondary)",
+                borderColor:
+                  leftSection === "history"
+                    ? "var(--primary-border)"
+                    : "var(--border)",
+              }}
+            >
+              <Clock size={13} /> History
+            </button>
           </div>
 
           {leftSection === "pipeline" ? (
@@ -1157,11 +702,11 @@ function App() {
                         ? "error"
                         : null;
                 return (
-                  <div 
-                    key={agent.id} 
-                    className={`dashboard-tile ${activeTab === agent.id ? 'active' : ''} ${s === 'completed' ? 'clickable' : ''} ${s === 'running' ? 'is-running' : ''}`}
-                    onClick={() => (s === 'completed' || s === 'running') && setActiveTab(agent.id)}
-                    style={{ cursor: (s === 'completed' || s === 'running') ? 'pointer' : 'default' }}
+                  <button
+                    key={item.id}
+                    className={`nav-item${activeTab === item.id ? " active" : ""}${!clickable ? " muted" : ""}`}
+                    onClick={() => clickable && setActiveTab(item.id)}
+                    disabled={!clickable}
                   >
                     <Icon size={15} />
                     <span className="nav-item-label">{item.label}</span>
@@ -1220,18 +765,233 @@ function App() {
           )}
         </div>
 
-            <div style={{ display: 'flex', gap: '32px' }}>
-              {/* Tabs Navigation */}
-              <div style={{ width: '240px', flexShrink: 0 }}>
-                <div className="glass-panel" style={{ padding: '20px', position: 'sticky', top: '40px' }}>
-                  <h3 style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', textTransform: 'uppercase', marginBottom: '16px' }}>Dashboard</h3>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                    <button onClick={() => setActiveTab('overview')} className={`nav-item ${activeTab === 'overview' ? 'active' : ''}`}>
-                      <Layers size={16} /> Overview
-                    </button>
-                    {AGENTS.map(a => status[a.id] && (
-                      <button key={a.id} onClick={() => setActiveTab(a.id)} className={`nav-item ${activeTab === a.id ? 'active' : ''} ${status[a.id] === 'running' ? 'running' : ''}`}>
-                        <a.icon size={16} /> {a.label}
+        <div className="nav-divider" />
+        <div style={{ padding: "4px 12px 8px" }}>
+          <button className="nav-item" style={{ opacity: 0.55 }}>
+            <Settings size={15} />
+            <span className="nav-item-label">Settings</span>
+          </button>
+        </div>
+
+        <div className="nav-credits">
+          <div className="nav-credits-title">Powered by</div>
+          <div className="nav-credit-item">
+            <div className="nav-credit-dot" style={{ background: "#7c3aed" }} />
+            <span className="nav-credit-brand">Gradium:</span> Voice Agents
+          </div>
+          <div className="nav-credit-item">
+            <div className="nav-credit-dot" style={{ background: "#0284c7" }} />
+            <span className="nav-credit-brand">Tavily:</span> Market Research
+          </div>
+          <div className="nav-credit-item">
+            <div className="nav-credit-dot" style={{ background: "#1a73e8" }} />
+            <span className="nav-credit-brand">Google DeepMind:</span> LLMs
+          </div>
+          <div className="nav-credit-item">
+            <div className="nav-credit-dot" style={{ background: "#10b981" }} />
+            <span className="nav-credit-brand">Pioneer:</span> Synthetic Data
+          </div>
+        </div>
+      </nav>
+
+      {/* ── Main area ── */}
+      <main className="main">
+        {/* Topbar */}
+        <div className="topbar">
+          <div className="topbar-search">
+            <Search size={14} style={{ flexShrink: 0 }} />
+            <input
+              placeholder="Search agents, results…"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
+          </div>
+
+          <div className="topbar-right">
+            <div className="stat-chip">
+              <Cpu size={13} /> {totalTokens.toLocaleString()} tokens
+            </div>
+            <div className="stat-chip">
+              <Search size={13} /> {totalSearches} searches
+            </div>
+            <button
+              className="theme-toggle"
+              onClick={() => setDarkMode((d) => !d)}
+              title={darkMode ? "Light mode" : "Dark mode"}
+            >
+              {darkMode ? <Sun size={15} /> : <Moon size={15} />}
+            </button>
+            <button
+              className="btn-new"
+              onClick={() => {
+                setIdea("");
+                setResults({});
+                setStatus({});
+                setCurrentSessionId(null);
+              }}
+            >
+              <Plus size={14} /> New Analysis
+            </button>
+            <div className="topbar-avatar">
+              <div className="topbar-avatar-img">F</div>
+              <div>
+                <div className="topbar-avatar-name">Founder</div>
+                <div className="topbar-avatar-role">Analyst</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Page inner */}
+        <div className="page-inner">
+          {/* Idea prompt bar — always visible */}
+          <IdeaPromptBar
+            idea={idea}
+            isOrchestrating={isOrchestrating}
+            onIdeaChange={setIdea}
+            onRerun={startAnalysis}
+          />
+
+          {/* Error banner */}
+          {globalError && (
+            <div
+              className="error-box fade-in"
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+              }}
+            >
+              <div>
+                <strong>Pipeline interrupted</strong>
+                <p style={{ margin: "4px 0 0", fontSize: "0.85rem" }}>
+                  {globalError}
+                </p>
+              </div>
+              <button
+                className="btn-ghost"
+                onClick={() => setGlobalError(null)}
+              >
+                Dismiss
+              </button>
+            </div>
+          )}
+
+          {/* ── Overview / Dashboard ── */}
+          {activeTab === "overview" && (
+            <div
+              className="fade-in"
+              style={{ display: "flex", flexDirection: "column", gap: 18 }}
+            >
+              {/* Row 1: Research Timeline + Customer Interviews + Pipeline Stats */}
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr 1fr 300px",
+                  gap: 18,
+                }}
+              >
+                {/* Research Timeline */}
+                <div className="card">
+                  <div className="card-header">
+                    <div className="card-title">
+                      <div
+                        className="card-title-icon"
+                        style={{ background: "rgba(108,99,255,0.10)" }}
+                      >
+                        <Activity size={14} color="var(--primary)" />
+                      </div>
+                      Research Timeline
+                    </div>
+                  </div>
+                  <div className="timeline-track">
+                    {AGENTS.map((agent, idx) => {
+                      const s = status[agent.id] || "pending";
+                      const ts = agentTimestamps[agent.id];
+                      const duration =
+                        ts?.start && ts?.end
+                          ? ((ts.end - ts.start) / 1000).toFixed(0)
+                          : null;
+                      const startTime = ts?.start
+                        ? new Date(ts.start).toLocaleTimeString([], {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })
+                        : null;
+                      const Icon = agent.icon;
+                      const isLast = idx === AGENTS.length - 1;
+                      return (
+                        <div key={agent.id} className="timeline-item">
+                          <div className="timeline-left">
+                            <div className={`timeline-node ${s}`}>
+                              {s === "completed" ? (
+                                <CheckCircle2 size={12} />
+                              ) : s === "running" ? (
+                                <div
+                                  className="spinner"
+                                  style={{ width: 10, height: 10 }}
+                                />
+                              ) : (
+                                <Icon size={11} />
+                              )}
+                            </div>
+                            {!isLast && (
+                              <div
+                                className={`timeline-line ${s === "pending" ? "" : "active"}`}
+                              />
+                            )}
+                          </div>
+                          <div
+                            className={`timeline-content${s === "completed" ? " clickable" : ""}`}
+                            onClick={() =>
+                              s === "completed" && setActiveTab(agent.id)
+                            }
+                          >
+                            <div className="timeline-name">{agent.label}</div>
+                            <div className="timeline-meta">
+                              {startTime && <span>{startTime}</span>}
+                              {duration && <span>{duration}s</span>}
+                              {tokens[agent.id] ? (
+                                <span>
+                                  {tokens[agent.id].toLocaleString()} tokens
+                                </span>
+                              ) : null}
+                              {searches[agent.id]?.length ? (
+                                <span>
+                                  {searches[agent.id].length} searches
+                                </span>
+                              ) : null}
+                              {s === "pending" && (
+                                <span style={{ color: "var(--text-muted)" }}>
+                                  Pending
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Customer Interviews */}
+                <div className="card">
+                  <div className="card-header">
+                    <div className="card-title">
+                      <div
+                        className="card-title-icon"
+                        style={{ background: "rgba(34,197,94,0.10)" }}
+                      >
+                        <Users size={14} color="#16a34a" />
+                      </div>
+                      Customer Interviews
+                    </div>
+                    {interviews.length > 0 && (
+                      <button
+                        className="see-all"
+                        onClick={() => setActiveTab("interviews")}
+                      >
+                        See All
                       </button>
                     )}
                   </div>
@@ -1580,630 +1340,140 @@ function App() {
                 </div>
               </div>
 
-              {/* Viewport Area */}
-              <div style={{ flex: 1 }}>
-                {analysisStage === 'awaiting_approval' && (
-                  <div className="checkpoint-card fade-in" style={{ marginBottom: '20px' }}>
-                    <div className="flex-between checkpoint-header" style={{ gap: '16px', alignItems: 'flex-start' }}>
-                      <div>
-                        <h3 style={{ margin: 0, fontSize: '1rem' }}>Checkpoint: review the refined idea first</h3>
-                        <p style={{ margin: '6px 0 0', fontSize: '0.9rem', color: 'var(--text-secondary)' }}>
-                          Review each section, accept it with a tick, or flag it for another refinement pass before spending tokens on research.
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="checkpoint-guidance">
-                      <div className="checkpoint-pill">{acceptedSections}/{reviewableSections.length || 0} sections accepted</div>
-                      <div className="checkpoint-pill">{flaggedSections.length} sections flagged</div>
-                      <div className="checkpoint-pill">Accept or revise each section</div>
-                    </div>
-
-                    <div className="checkpoint-actions">
-                      <button
-                        onClick={refineFlaggedSections}
-                        disabled={isOrchestrating || flaggedSections.length === 0}
-                        style={{ background: 'white', color: 'var(--text-primary)', border: '1px solid #cbd5e1' }}
+              {/* Row 2: Status + Recent Sessions */}
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr 2fr",
+                  gap: 18,
+                }}
+              >
+                {/* Status — live pipeline activity */}
+                <div className="card">
+                  <div className="card-header">
+                    <div className="card-title">
+                      <div
+                        className="card-title-icon"
+                        style={{ background: "rgba(108,99,255,0.10)" }}
                       >
-                        Refine Flagged Sections
-                      </button>
-                      <button onClick={continueAnalysis} disabled={isOrchestrating || !allSectionsAccepted}>
-                        <ArrowRight size={16} />
-                        Continue To Research
-                      </button>
+                        <Radio size={14} color="var(--primary)" />
+                      </div>
+                      Status
                     </div>
                   </div>
-                )}
-                {analysisStage === 'awaiting_research_approval' && (
-                  <div className="checkpoint-card fade-in" style={{ marginBottom: '20px' }}>
-                    <div className="flex-between checkpoint-header" style={{ gap: '16px', alignItems: 'flex-start' }}>
-                      <div>
-                        <h3 style={{ margin: 0, fontSize: '1rem' }}>Checkpoint: review research before synthesis</h3>
-                        <p style={{ margin: '6px 0 0', fontSize: '0.9rem', color: 'var(--text-secondary)' }}>
-                          Market research and competitor analysis are ready. Review both tabs, then continue to UX, scoring, visibility, and UI generation.
-                        </p>
-                      </div>
-                    </div>
+                  {(() => {
+                    const errors = AGENTS.filter(
+                      (a) => status[a.id] === "error",
+                    );
+                    const running = AGENTS.filter(
+                      (a) => status[a.id] === "running",
+                    );
+                    const completed = AGENTS.filter(
+                      (a) => status[a.id] === "completed",
+                    ).sort(
+                      (a, b) =>
+                        (agentTimestamps[b.id]?.end || 0) -
+                        (agentTimestamps[a.id]?.end || 0),
+                    );
+                    const items = [...errors, ...running, ...completed].slice(
+                      0,
+                      3,
+                    );
 
-                    <div className="checkpoint-guidance">
-                      <div className={`checkpoint-pill ${activeTab === 'market' ? 'is-selected' : ''}`}>Market research complete</div>
-                      <div className={`checkpoint-pill ${activeTab === 'competitors' ? 'is-selected' : ''}`}>Competitor analysis complete</div>
-                      <div className="checkpoint-pill">Human review before downstream agents</div>
-                    </div>
-
-                    <div className="checkpoint-actions">
-                      <button onClick={() => setActiveTab('market')} className={activeTab === 'market' ? 'checkpoint-tab-highlight' : ''} style={{ background: 'white', color: 'var(--text-primary)', border: '1px solid #cbd5e1' }}>
-                        Review Market Research
-                      </button>
-                      <button onClick={() => setActiveTab('competitors')} className={activeTab === 'competitors' ? 'checkpoint-tab-highlight' : ''} style={{ background: 'white', color: 'var(--text-primary)', border: '1px solid #cbd5e1' }}>
-                        Review Competitors
-                      </button>
-                      <button onClick={continueAnalysis} disabled={isOrchestrating}>
-                        <ArrowRight size={16} />
-                        Continue To The Rest
-                      </button>
-                    </div>
-                  </div>
-                )}
-                <div className={`glass-panel ${activeTab === 'interviews' ? 'interview-shell' : ''}`} style={{ padding: '32px', minHeight: '600px' }}>
-                  {status[activeTab] === 'running' && (
-                    <div className="streaming-banner">
-                      <span className="streaming-wave"></span>
-                      <span className="streaming-dot"></span>
-                      <span className="streaming-copy">Streaming live. New output appears as the agent writes.</span>
-                    </div>
-                  )}
-                  {activeTab === 'overview' ? (
-                    <div className="fade-in">
-                       <h2 style={{ marginBottom: '24px' }}>Executive Summary</h2>
-                       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px' }}>
-                          {results['refine'] && (
-                            <div className="glass-panel" style={{ gridColumn: 'span 2', background: 'white' }}>
-                              <h3 style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
-                                <Sparkles size={18} color="var(--accent)" /> Vision
-                              </h3>
-                              <ReactMarkdown>{results['refine'].split('##')[1]?.slice(0, 500) || results['refine'].slice(0, 200)}</ReactMarkdown>
+                    if (items.length === 0)
+                      return (
+                        <div className="alert-list">
+                          <div className="alert-item">
+                            <div className="alert-dot info" />
+                            <div className="alert-text">
+                              Pipeline not started yet.
                             </div>
-                          )}
-                          {results['scoring'] && (
-                            <div className="glass-panel" style={{ background: 'var(--accent-glow)', border: '1px solid var(--accent)' }}>
-                               <h3>Verdict</h3>
-                               <ReactMarkdown>{results['scoring'].split('## OVERALL VALIDATION SCORE')[1]?.split('##')[0] || 'Pending'}</ReactMarkdown>
-                            </div>
-                          )}
-                       </div>
-                       
-                       <div style={{ marginTop: '40px', padding: '32px', textAlign: 'center', borderTop: '1px solid #f1f5f9' }}>
-                          <h3 style={{ marginBottom: '12px' }}>Simulate User Feedback</h3>
-                          <button 
-                            className="btn-primary" 
-                            onClick={startInterviews}
-                            disabled={isSimulating}
-                            style={{ margin: '0 auto' }}
-                          >
-                            {isSimulating ? <div className="spinner"></div> : <Activity size={20} />}
-                            {isSimulating ? 'Generating...' : 'Simulate 5 Interviews'}
-                          </button>
-                       </div>
-                    </div>
-                  ) : activeTab === 'interviews' ? (
-                    <div className="fade-in interview-lab">
-                      <div className="interview-mini-header">
-                        <div>
-                          <span className="visual-eyebrow">Customer Validation Lab</span>
-                          <h2>Simulated user interviews</h2>
+                          </div>
                         </div>
-                        <div className="interview-mini-stats">
-                          <span>{interviews.length}/5 personas</span>
-                          <span>{completedInterviewCount} completed</span>
-                          <span>{activeInterview ? `${activeInterview.user.name} live` : isSimulating ? 'Generating personas' : 'Ready'}</span>
-                        </div>
-                      </div>
+                      );
 
-                      {interviews.length === 0 ? (
-                        <div className="persona-empty-state compact">
-                          <UserRound size={24} />
-                          <p>No personas yet. Start the simulation from the overview tab.</p>
-                        </div>
-                      ) : (
-                        <div className="persona-tab-strip" role="tablist" aria-label="Interview personas">
-                          {interviews.map((int, idx) => (
-                            <button
-                              key={`${int.user.name}-${idx}`}
-                              type="button"
-                              onClick={() => setSelectedInterviewIndex(idx)}
-                              className={`persona-tab ${selectedInterviewIndex === idx ? 'selected' : ''} status-${int.status}`}
-                            >
-                              <span className="persona-tab-name">{int.user.name}</span>
-                              <span className="persona-tab-meta">{int.user.context.role || int.user.archetype}</span>
-                            </button>
-                          ))}
-                        </div>
-                      )}
-
-                      <div className="interview-focus-layout">
-                        <div className="interview-stage compact">
-                          {selectedInterview ? (
-                            <>
-                              <div className="interview-stage-header">
-                                <div>
-                                  <span className="visual-eyebrow">Active Interview</span>
-                                  <h3>{selectedInterview.user.name}</h3>
-                                  <p>{selectedInterview.user.context.role || selectedInterview.user.archetype} • {selectedInterview.user.context.company_or_context || 'Context forming'}</p>
-                                </div>
-                                <div className={`interview-live-pill ${selectedInterview.status}`}>
-                                  <span className="interview-live-dot"></span>
-                                  {selectedInterview.status === 'complete' ? 'Interview complete' : selectedInterview.status === 'interviewing' ? 'Streaming answer' : selectedInterview.status === 'ready' ? 'Persona created' : 'Building persona'}
-                                </div>
-                              </div>
-
-                              <div className="interview-summary-bar">
-                                <div className="interview-summary-main">
-                                  <span className="interview-summary-label">Interview summary</span>
-                                  <p>{selectedSummary}</p>
-                                </div>
-                                <div className="interview-summary-meta">
-                                  <span>{selectedInterview.user.context.role || selectedInterview.user.archetype}</span>
-                                  <span>{(selectedPainPoints[0] || selectedInterview.focus_points[0] || 'Real-world concerns').slice(0, 60)}</span>
-                                </div>
-                              </div>
-
-                              <div className="loom-player-shell">
-                                <div className="loom-player-topbar">
-                                  <div className="loom-player-meta">
-                                    <div className="loom-player-avatar">{selectedInterview.user.name.split(' ').map((part: string) => part[0]).join('').slice(0, 2)}</div>
-                                    <div>
-                                      <strong>{selectedInterview.user.name}</strong>
-                                      <span>{selectedInterview.user.context.role || selectedInterview.user.archetype}</span>
-                                    </div>
-                                  </div>
-                                  <div className="loom-player-controls">
-                                    <button type="button" className="loom-control-btn" onClick={togglePlayback}>
-                                      {visiblePlaybackCount >= playbackMessages.length
-                                        ? <Play size={14} />
-                                        : isPlaybackRunning
-                                          ? <Pause size={14} />
-                                          : <Play size={14} />}
-                                    </button>
-                                    <span className="loom-control-copy">
-                                      {visiblePlaybackCount >= playbackMessages.length
-                                        ? 'Replay interview'
-                                        : isPlaybackRunning
-                                          ? 'Playing'
-                                          : 'Paused'}
-                                    </span>
-                                  </div>
-                                </div>
-
-                                <div className="interview-quote-card minimal">
-                                  <Quote size={16} />
-                                  <p>{selectedInterview.user.context.quote_seed || 'Show me why this belongs in my workflow.'}</p>
-                                </div>
-
-                                <div className="chat-viewport" ref={chatViewportRef}>
-                                  <div className="transcript-shell compact minimal">
-                                    {playbackMessages.slice(0, visiblePlaybackCount).map((message) => (
-                                      <div
-                                        key={message.key}
-                                        className={`transcript-turn ${
-                                          message.role === 'agent'
-                                            ? 'interviewer'
-                                            : message.role === 'user'
-                                              ? 'viewer'
-                                              : 'participant'
-                                        }`}
-                                      >
-                                        <div className="transcript-speaker">{message.speaker}</div>
-                                        <div className="transcript-bubble">
-                                          <ReactMarkdown>{message.text}</ReactMarkdown>
-                                        </div>
-                                      </div>
-                                    ))}
-                                    {(selectedInterview.status === 'interviewing' || askingFollowUp === selectedInterview.user.name) && (
-                                      <div className="transcript-turn participant">
-                                        <div className="transcript-speaker">{selectedInterview.user.name}</div>
-                                        <div className="transcript-bubble typing-state">
-                                          <span className="typing-cursor"></span>
-                                        </div>
-                                      </div>
-                                    )}
-                                  </div>
-                                </div>
-
-                                <div className="follow-up-bar">
-                                  <textarea
-                                    value={followUpQuestion}
-                                    onChange={(e) => setFollowUpQuestion(e.target.value)}
-                                    placeholder={`Ask ${selectedInterview.user.name} a follow-up question...`}
-                                    className="follow-up-input"
-                                  />
-                                  <button
-                                    type="button"
-                                    onClick={askSelectedInterviewQuestion}
-                                    disabled={!followUpQuestion.trim() || askingFollowUp === selectedInterview.user.name}
-                                    className="follow-up-button"
-                                  >
-                                    {askingFollowUp === selectedInterview.user.name ? 'Asking...' : 'Ask User'}
-                                  </button>
-                                </div>
-                              </div>
-                            </>
-                          ) : (
-                            <div className="persona-empty-state">
-                              <Radar size={24} />
-                              <p>Select a persona to open the interview room.</p>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  ) : activeTab === 'refine' && refinementSections.length > 0 ? (
-                    <div className="fade-in">
-                      {refinementSections.map((section) => {
-                        const review = sectionReview[section.key] || { decision: 'pending', notes: '' };
-                        const showControls = analysisStage === 'awaiting_approval' && section.key !== 'checkpoint';
-
-                        return (
-                          <section key={section.key} className="refine-section-card">
-                            <div className="refine-section-header">
-                              <div>
-                                <h2 style={{ marginBottom: '6px' }}>{section.title}</h2>
-                                {showControls && (
-                                  <span className={`review-status review-status-${review.decision}`}>
-                                    {review.decision === 'accepted' ? 'Accepted' : review.decision === 'revise' ? 'Edit requested' : 'Pending review'}
-                                  </span>
+                    return (
+                      <div className="alert-list">
+                        {items.map((a) => {
+                          const s = status[a.id];
+                          const ts = agentTimestamps[a.id];
+                          const duration =
+                            ts?.start && ts?.end
+                              ? `${((ts.end - ts.start) / 1000).toFixed(0)}s`
+                              : null;
+                          return (
+                            <div key={a.id} className="alert-item">
+                              {s === "error" && (
+                                <div className="alert-dot error" />
+                              )}
+                              {s === "running" && (
+                                <div className="alert-dot warning" />
+                              )}
+                              {s === "completed" && (
+                                <div
+                                  className="alert-dot"
+                                  style={{ background: "var(--success)" }}
+                                />
+                              )}
+                              <div className="alert-text">
+                                <span
+                                  className="alert-link"
+                                  style={{
+                                    cursor:
+                                      s === "completed" ? "pointer" : "default",
+                                  }}
+                                  onClick={() =>
+                                    s === "completed" && setActiveTab(a.id)
+                                  }
+                                >
+                                  {a.label}
+                                </span>
+                                {s === "error" && " failed."}
+                                {s === "running" && " is streaming…"}
+                                {s === "completed" && (
+                                  <>
+                                    {" "}
+                                    completed{duration ? ` in ${duration}` : ""}
+                                    .
+                                  </>
                                 )}
                               </div>
                             </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  })()}
+                </div>
 
-                            <div className="markdown-content">
-                              <ReactMarkdown>{section.content}</ReactMarkdown>
-                            </div>
-
-                            {showControls && (
-                              <div className="section-review-panel">
-                                <div className="section-review-inline">
-                                  <span className="section-review-label">Review</span>
-
-                                  <label className={`compact-choice ${review.decision === 'accepted' ? 'selected' : ''}`}>
-                                    <input
-                                      type="radio"
-                                      name={`section-${section.key}`}
-                                      value="accepted"
-                                      checked={review.decision === 'accepted'}
-                                      onChange={() => updateSectionDecision(section.key, 'accepted')}
-                                    />
-                                    <span>Accept</span>
-                                  </label>
-
-                                  <label className={`compact-choice ${review.decision === 'revise' ? 'selected' : ''}`}>
-                                    <input
-                                      type="radio"
-                                      name={`section-${section.key}`}
-                                      value="revise"
-                                      checked={review.decision === 'revise'}
-                                      onChange={() => updateSectionDecision(section.key, 'revise')}
-                                    />
-                                    <span>Revise</span>
-                                  </label>
-                                </div>
-
-                                {review.decision === 'revise' && (
-                                  <div className="section-revise-box">
-                                    <textarea
-                                      value={review.notes}
-                                      onChange={(e) => updateSectionNotes(section.key, e.target.value)}
-                                      placeholder={`What should change in "${section.title}"? Add details to include, claims to remove, or wording to tighten.`}
-                                      style={{ minHeight: '100px', marginTop: '12px' }}
-                                    />
-                                    <div className="section-revise-actions">
-                                      <button
-                                        onClick={() => refineSingleSection(section.title, section.key)}
-                                        disabled={isOrchestrating || refiningSectionKey === section.key || !review.notes.trim()}
-                                      >
-                                        <Sparkles size={16} />
-                                        {refiningSectionKey === section.key ? 'Refining This Section...' : 'Refine This Section'}
-                                      </button>
-                                    </div>
-                                  </div>
-                                )}
-                              </div>
-                            )}
-                          </section>
-                        );
-                      })}
+                {/* Recent sessions */}
+                <div className="card">
+                  <div className="card-header">
+                    <div className="card-title">
+                      <div
+                        className="card-title-icon"
+                        style={{ background: "rgba(56,189,248,0.10)" }}
+                      >
+                        <Clock size={14} color="#0284c7" />
+                      </div>
+                      Recent Sessions
                     </div>
-                  ) : activeTab === 'refine' && status['refine'] === 'running' ? (
-                    <div className="markdown-content fade-in">
-                      <p className="streaming-helper">The refinement draft is streaming in. Sections will become reviewable as headings arrive.</p>
-                      <ReactMarkdown>{results['refine'] || 'Starting idea refinement...'}</ReactMarkdown>
-                    </div>
-                  ) : activeTab === 'market' && results['market'] ? (
-                    <div className="fade-in">
-                      <div className="stage-visual">
-                        <div className="stage-visual-header">
-                          <span className="visual-eyebrow">Market Snapshot</span>
-                          <h2>Market Dashboard</h2>
-                        </div>
-                        <div className="market-visual-grid">
-                          <div className="metric-card">
-                            <span className="metric-label">TAM signal</span>
-                            <div className="metric-value">{extractNumber(marketTam) || 'Sizing needed'}</div>
-                            <p>{sentencePreview(marketTam, 'Market size summary from the report.')}</p>
-                          </div>
-                          <div className="metric-card alt">
-                            <span className="metric-label">Growth signal</span>
-                            <div className="metric-value">{extractNumber(marketTrajectory) || 'Trend signal'}</div>
-                            <p>{sentencePreview(marketTrajectory, 'Trajectory and trend summary from the report.')}</p>
-                          </div>
-                          <div className="insight-card">
-                            <h3>Opportunities</h3>
-                            <div className="chip-cloud">
-                              {(marketOpportunities.length ? marketOpportunities : extractShortLines(extractMarkdownSection(results['market'] || '', 'Executive Summary'), 3)).map((item) => (
-                                <span key={item} className="insight-chip positive">{item}</span>
-                              ))}
-                            </div>
-                          </div>
-                          <div className="insight-card">
-                            <h3>Risks</h3>
-                            <div className="chip-cloud">
-                              {(marketRisks.length ? marketRisks : ['Validate source quality', 'Confirm market timing']).map((item) => (
-                                <span key={item} className="insight-chip warning">{item}</span>
-                              ))}
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                      <div className="markdown-content">
-                        <ReactMarkdown>{results['market']}</ReactMarkdown>
-                      </div>
-                      {analysisStage === 'awaiting_research_approval' && (
-                        <div className="research-iteration-box">
-                          <h3>Refine Market Research</h3>
-                          <textarea
-                            value={researchReview.market}
-                            onChange={(e) => updateResearchReview('market', e.target.value)}
-                            placeholder="Ask for clearer data, stronger sources, less fluff, more buyer-specific insights, or removal of weak claims."
-                            style={{ minHeight: '110px' }}
-                          />
-                          <div className="section-revise-actions">
-                            <button
-                              onClick={() => rerunResearchAgent('market')}
-                              disabled={isOrchestrating || refiningResearchKey === 'market' || !researchReview.market.trim()}
-                            >
-                              <Sparkles size={16} />
-                              {refiningResearchKey === 'market' ? 'Refining Market Research...' : 'Refine Market Research'}
-                            </button>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  ) : activeTab === 'competitors' && results['competitors'] ? (
-                    <div className="fade-in">
-                      <div className="stage-visual">
-                        <div className="stage-visual-header">
-                          <span className="visual-eyebrow">Competitive View</span>
-                          <h2>Competitor Matrix</h2>
-                        </div>
-                        <div className="matrix-board">
-                          <div className="matrix-axis axis-y">Differentiation</div>
-                          <div className="matrix-axis axis-x">Market Maturity</div>
-                          <div className="matrix-grid">
-                            <div className="matrix-cell">
-                              <span>Emerging gap</span>
-                              <p>{sentencePreview(competitorOverview, 'Whitespace in the market.', 80)}</p>
-                            </div>
-                            <div className="matrix-cell">
-                              <span>Established players</span>
-                              <p>{sentencePreview(visibilityCompetition || competitorOverview, 'Crowded incumbent zone.', 80)}</p>
-                            </div>
-                            <div className="matrix-cell highlight">
-                              <span>Your wedge</span>
-                              <p>{(competitorGaps[0] || competitorDifferentiation[0] || 'Define the sharpest positioning gap here.').slice(0, 90)}</p>
-                            </div>
-                            <div className="matrix-cell">
-                              <span>Premium niche</span>
-                              <p>{(competitorDifferentiation[1] || competitorGaps[1] || 'Opportunity for focused premium positioning.').slice(0, 90)}</p>
-                            </div>
-                          </div>
-                        </div>
-                        <div className="dual-column-chips">
-                          <div>
-                            <h3>Positioning Gaps</h3>
-                            <div className="chip-cloud">
-                              {(competitorGaps.length ? competitorGaps : ['Sharpen the underserved buyer segment']).map((item) => (
-                                <span key={item} className="insight-chip neutral">{item}</span>
-                              ))}
-                            </div>
-                          </div>
-                          <div>
-                            <h3>Differentiation</h3>
-                            <div className="chip-cloud">
-                              {(competitorDifferentiation.length ? competitorDifferentiation : ['Turn a market gap into a defensible promise']).map((item) => (
-                                <span key={item} className="insight-chip positive">{item}</span>
-                              ))}
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                      <div className="markdown-content">
-                        <ReactMarkdown>{results['competitors']}</ReactMarkdown>
-                      </div>
-                      {analysisStage === 'awaiting_research_approval' && (
-                        <div className="research-iteration-box">
-                          <h3>Refine Competitor Analysis</h3>
-                          <textarea
-                            value={researchReview.competitors}
-                            onChange={(e) => updateResearchReview('competitors', e.target.value)}
-                            placeholder="Ask for stronger competitor picks, clearer gaps, better differentiation, or removal of weak examples."
-                            style={{ minHeight: '110px' }}
-                          />
-                          <div className="section-revise-actions">
-                            <button
-                              onClick={() => rerunResearchAgent('competitors')}
-                              disabled={isOrchestrating || refiningResearchKey === 'competitors' || !researchReview.competitors.trim()}
-                            >
-                              <Sparkles size={16} />
-                              {refiningResearchKey === 'competitors' ? 'Refining Competitor Analysis...' : 'Refine Competitor Analysis'}
-                            </button>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  ) : activeTab === 'ux' && results['ux'] ? (
-                    <div className="fade-in">
-                      <div className="stage-visual">
-                        <div className="stage-visual-header">
-                          <span className="visual-eyebrow">Journey Map</span>
-                          <h2>UX Flow Canvas</h2>
-                        </div>
-                        <div className="journey-track">
-                          {[
-                            { label: 'Before', text: uxWorld || 'What life looks like before the product.' },
-                            { label: 'Discovery', text: uxDiscovery || 'How the user discovers the product.' },
-                            { label: 'First 30s', text: uxFirst30 || 'The initial onboarding moment.' },
-                            { label: 'Value', text: uxPath || 'How the user reaches value.' },
-                            { label: 'Loop', text: uxCoreLoop || 'What keeps them returning.' },
-                          ].map((step, index) => (
-                            <div key={step.label} className="journey-step">
-                              <div className="journey-index">0{index + 1}</div>
-                              <h3>{step.label}</h3>
-                              <p>{sentencePreview(step.text, step.text, 110)}</p>
-                            </div>
-                          ))}
-                        </div>
-                        <div className="dual-column-chips">
-                          <div>
-                            <h3>Emotional Arc</h3>
-                            <p className="visual-body-copy">{sentencePreview(uxEmotionalArc, 'Confidence rises as friction drops.', 220)}</p>
-                          </div>
-                          <div>
-                            <h3>Roadmap</h3>
-                            <div className="chip-cloud">
-                              {(uxRoadmap.length ? uxRoadmap : ['Must Have: clarify the first core workflow']).map((item) => (
-                                <span key={item} className="insight-chip neutral">{item}</span>
-                              ))}
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                      <div className="markdown-content">
-                        <ReactMarkdown>{results['ux']}</ReactMarkdown>
-                      </div>
-                    </div>
-                  ) : activeTab === 'scoring' && results['scoring'] ? (
-                    <div className="fade-in">
-                      <div className="stage-visual">
-                        <div className="stage-visual-header">
-                          <span className="visual-eyebrow">Decision Layer</span>
-                          <h2>Validation Scoreboard</h2>
-                        </div>
-                        <div className="score-hero">
-                          <div className="score-ring">
-                            <div className="score-ring-inner">
-                              <span className="score-ring-value">{scoreValue ?? '--'}</span>
-                              <span className="score-ring-label">Score</span>
-                            </div>
-                          </div>
-                          <div className="score-summary">
-                            <h3>{verdictText || 'Awaiting verdict summary'}</h3>
-                            <div className="dual-column-chips">
-                              <div>
-                                <h4>Key Risks</h4>
-                                <div className="chip-cloud">
-                                  {(scoreRisks.length ? scoreRisks : ['Risk summary not parsed yet']).map((item) => (
-                                    <span key={item} className="insight-chip warning">{item}</span>
-                                  ))}
-                                </div>
-                              </div>
-                              <div>
-                                <h4>Next Steps</h4>
-                                <div className="chip-cloud">
-                                  {(scoreNextSteps.length ? scoreNextSteps : ['Next step summary not parsed yet']).map((item) => (
-                                    <span key={item} className="insight-chip positive">{item}</span>
-                                  ))}
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                      <div className="markdown-content">
-                        <ReactMarkdown>{results['scoring']}</ReactMarkdown>
-                      </div>
-                    </div>
-                  ) : activeTab === 'visibility' && results['visibility'] ? (
-                    <div className="fade-in">
-                      <div className="stage-visual">
-                        <div className="stage-visual-header">
-                          <span className="visual-eyebrow">AI Discovery</span>
-                          <h2>Visibility Dashboard</h2>
-                        </div>
-                        <div className="market-visual-grid">
-                          <div className="metric-card alt">
-                            <span className="metric-label">Visibility score</span>
-                            <div className="metric-value">{visibilityScore ?? '--'}</div>
-                            <p>{sentencePreview(visibilitySummary, 'How AI systems currently describe the concept.', 120)}</p>
-                          </div>
-                          <div className="insight-card">
-                            <h3>Competitive visibility</h3>
-                            <p className="visual-body-copy">{sentencePreview(visibilityCompetition, 'Competitive visibility landscape summary.', 180)}</p>
-                          </div>
-                          <div className="insight-card" style={{ gridColumn: '1 / -1' }}>
-                            <h3>Optimization recommendations</h3>
-                            <div className="chip-cloud">
-                              {(visibilityRecommendations.length ? visibilityRecommendations : ['Strengthen product-language consistency across AI-facing touchpoints']).map((item) => (
-                                <span key={item} className="insight-chip neutral">{item}</span>
-                              ))}
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                      <div className="markdown-content">
-                        <ReactMarkdown>{results['visibility']}</ReactMarkdown>
-                      </div>
-                    </div>
-                  ) : activeTab === 'ui' && results['ui'] ? (
-                    <div className="fade-in">
-                      <div className="visual-snapshot">
-                        <div className="visual-snapshot-copy">
-                          <span className="visual-eyebrow">Visual Snapshot</span>
-                          <h2>{snapshotTitle}</h2>
-                          <p>{snapshotHero.slice(0, 240)}</p>
-                          <div className="visual-chip-row">
-                            {(snapshotChips.length > 0 ? snapshotChips : ['Clear value prop', 'Focused first user', 'Product-led flow']).map((chip) => (
-                              <span key={chip} className="visual-chip">{chip}</span>
-                            ))}
-                          </div>
-                        </div>
-                        <div className="visual-device">
-                          <div className="visual-nav">
-                            <span></span><span></span><span></span>
-                          </div>
-                          <div className="visual-hero-card">
-                            <div className="visual-badge">Launch-ready</div>
-                            <div className="visual-title">{extractMarkdownSection(results['ui'], 'Brand Vibe & Personality').split('. ')[0] || 'Product Story'}</div>
-                            <div className="visual-subtitle">{snapshotHero.slice(0, 140)}</div>
-                          </div>
-                          <div className="visual-grid">
-                            <div className="visual-mini-card">
-                              <div className="visual-mini-label">Hero</div>
-                              <div className="visual-mini-copy">{snapshotHero.slice(0, 70)}</div>
-                            </div>
-                            <div className="visual-mini-card alt">
-                              <div className="visual-mini-label">Core Flow</div>
-                              <div className="visual-mini-copy">{snapshotCore.slice(0, 70)}</div>
-                            </div>
-                            <div className="visual-mini-card">
-                              <div className="visual-mini-label">Audience</div>
-                              <div className="visual-mini-copy">{extractMarkdownSection(results['refine'] || '', 'Best Early User').replace(/^- /gm, '').slice(0, 70) || 'Early adopter profile'}</div>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                      <div className="markdown-content">
-                        <ReactMarkdown>{results['ui']}</ReactMarkdown>
-                      </div>
+                    <button
+                      className="see-all"
+                      onClick={() => setLeftSection("history")}
+                    >
+                      See All
+                    </button>
+                  </div>
+                  {sessions.length === 0 ? (
+                    <div
+                      style={{
+                        color: "var(--text-muted)",
+                        fontSize: "0.82rem",
+                        padding: "12px 0",
+                      }}
+                    >
+                      No saved sessions yet.
                     </div>
                   ) : (
                     <div className="templates-grid">
@@ -2232,10 +1502,37 @@ function App() {
             </div>
           )}
 
-            {!isOrchestrating && (
-              <div style={{ textAlign: 'center', marginTop: '40px' }}>
-                <button onClick={() => { setIdea(''); setResults({}); setStatus({}); setTokens({}); setSearches({}); setInterviews([]); setCurrentSessionId(null); setAnalysisStage('idle'); setActiveTab('refine'); setSectionReview({}); setGlobalError(null); }} style={{ background: 'white', border: '1px solid #e2e8f0' }}>
-                  Start New Validation
+          {/* ── Agent result tabs ── */}
+          {activeTab !== "overview" && activeTab !== "interviews" && (
+            <div className="content-card fade-in">
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "flex-end",
+                  marginBottom: 16,
+                }}
+              >
+                <button
+                  className="btn-ghost"
+                  style={{ gap: 6 }}
+                  disabled={!results[activeTab]}
+                  title="Download as Markdown"
+                  onClick={() => {
+                    const label =
+                      AGENTS.find((a) => a.id === activeTab)?.label ||
+                      activeTab;
+                    const blob = new Blob([results[activeTab]], {
+                      type: "text/markdown",
+                    });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement("a");
+                    a.href = url;
+                    a.download = `${label.toLowerCase().replace(/\s+/g, "-")}.md`;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                  }}
+                >
+                  <Download size={13} /> Download
                 </button>
               </div>
               <div className="markdown-content">
