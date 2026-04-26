@@ -30,6 +30,7 @@ import { AuthScreen } from "./components/AuthScreen";
 import { HomeScreen } from "./components/HomeScreen";
 import { IdeaPromptBar } from "./components/IdeaPromptBar";
 import { useTypewriterPlaceholder } from "./hooks/useTypewriterPlaceholder";
+import InterviewChatModal from "./components/InterviewChatModal";
 
 const TOTAL_INTERVIEWS = 7; // minimum interviews shown; update to match backend archetype count
 const API_BASE = "http://localhost:8000/api/v1";
@@ -221,6 +222,10 @@ export default function App() {
   >(null);
   const [isSimulating, setIsSimulating] = useState(false);
   const interviewBuffers = useRef<Record<string, string>>({});
+  const [chatHistories, setChatHistories] = useState<Record<string, {role: string, content: string}[]>>({});
+  const [chatInput, setChatInput] = useState("");
+  const [chatLoading, setChatLoading] = useState(false);
+  const [chatOpen, setChatOpen] = useState(false);
   const [globalError, setGlobalError] = useState<string | null>(null);
   const [sessions, setSessions] = useState<any[]>([]);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
@@ -311,6 +316,7 @@ export default function App() {
     if (authToken) headers.Authorization = `Bearer ${authToken}`;
     return headers;
   };
+
 
   // ── Data fetchers ────────────────────────────────────────────────────────
   const fetchSessions = async () => {
@@ -560,6 +566,77 @@ export default function App() {
       setGlobalError(e.message);
     } finally {
       setIsSimulating(false);
+    }
+  };
+
+  const sendFollowUp = async (question: string, interview: any) => {
+    if (!question.trim() || chatLoading || !interview?.is_complete) return;
+    const personaName = interview.user.context?.name || interview.user.name;
+    setChatHistories(prev => ({
+      ...prev,
+      [personaName]: [...(prev[personaName] || []), { role: "user", content: question }],
+    }));
+    setChatInput("");
+    setChatLoading(true);
+    // Add a placeholder assistant message that we'll update as chunks arrive
+    setChatHistories(prev => ({
+      ...prev,
+      [personaName]: [...(prev[personaName] || []), { role: "assistant", content: "" }],
+    }));
+    try {
+      const res = await fetch("http://localhost:8000/api/v1/agents/interviews/follow-up", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user: interview.user,
+          question,
+          prior_response: interview.response || "",
+          refined_idea: results["refine"] || "",
+          market_research: results["market"] || "",
+          competitors: results["competitors"] || "",
+          ux: results["ux"] || "",
+          ui: results["ui"] || "",
+          visibility: results["visibility"] || "",
+          scoring: results["scoring"] || "",
+        }),
+      });
+      if (!res.ok) throw new Error("Follow-up request failed");
+      const reader = res.body?.getReader();
+      if (!reader) throw new Error("No reader");
+      const dec = new TextDecoder();
+      let buf = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        const lines = buf.split("\n\n");
+        buf = lines.pop() || "";
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          const d = JSON.parse(line.slice(6));
+          if (d.chunk) {
+            setChatHistories(prev => {
+              const history = [...(prev[personaName] || [])];
+              const lastIdx = history.length - 1;
+              if (lastIdx >= 0 && history[lastIdx].role === "assistant") {
+                history[lastIdx] = { role: "assistant", content: history[lastIdx].content + d.chunk };
+              }
+              return { ...prev, [personaName]: history };
+            });
+          }
+        }
+      }
+    } catch (e: any) {
+      setChatHistories(prev => {
+        const history = [...(prev[personaName] || [])];
+        const lastIdx = history.length - 1;
+        if (lastIdx >= 0 && history[lastIdx].role === "assistant" && history[lastIdx].content === "") {
+          history[lastIdx] = { role: "assistant", content: "Sorry, something went wrong. Please try again." };
+        }
+        return { ...prev, [personaName]: history };
+      });
+    } finally {
+      setChatLoading(false);
     }
   };
 
@@ -1814,6 +1891,16 @@ export default function App() {
                             Listen
                           </button>
                         ))}
+                      {interviews[selectedInterviewIndex].is_complete && (
+                        <button
+                          className="btn-ghost tts-btn"
+                          onClick={() => { setChatInput(""); setChatOpen(true); }}
+                          title="Chat with this customer"
+                        >
+                          <Plus size={13} />
+                          Chat
+                        </button>
+                      )}
                     </div>
                     {interviews[selectedInterviewIndex].response ? (
                       <div className="markdown-content">
@@ -1897,6 +1984,19 @@ export default function App() {
           )}
         </div>
       </main>
+
+      {/* ── Chat modal ── */}
+      {chatOpen && selectedInterviewIndex !== null && interviews[selectedInterviewIndex] && (
+        <InterviewChatModal
+          interview={interviews[selectedInterviewIndex]}
+          history={chatHistories[interviews[selectedInterviewIndex].user.context?.name || interviews[selectedInterviewIndex].user.name] || []}
+          chatInput={chatInput}
+          chatLoading={chatLoading}
+          onInputChange={setChatInput}
+          onSend={sendFollowUp}
+          onClose={() => setChatOpen(false)}
+        />
+      )}
     </div>
   );
 }
