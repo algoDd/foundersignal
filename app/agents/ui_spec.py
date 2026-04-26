@@ -62,7 +62,7 @@ class UISpecAgent(BaseAgent):
             "   frontend. Include specific colors, fonts, animations, and layout details.\n"
         )
 
-        return await self.generate_structured(prompt, UISpec, max_tokens=16384)
+        return await self.generate_structured(prompt, UISpec, max_tokens=6144)
 
     async def run_stream_text(self, *, refined_idea_text: str, ux_flow_text: str):
         """Generate UI specifications based on text context and stream markdown."""
@@ -80,7 +80,11 @@ class UISpecAgent(BaseAgent):
             "## Design System Snapshot (Colors, Typography, Moodboard description)\n"
             "## Interaction Design (How elements move and respond)\n"
             "## Detailed Implementation Prompt (For building the high-fidelity UI)\n"
+            "\nRules:\n"
+            "- Do not use markdown tables.\n"
+            "- Use vivid but readable prose and bullets.\n"
+            "- Include concrete colors, layout cues, and visual hierarchy details.\n"
         )
 
-        async for chunk in self.stream_text(prompt, max_tokens=16384):
+        async for chunk in self.stream_text(prompt, max_tokens=6144):
             yield chunk

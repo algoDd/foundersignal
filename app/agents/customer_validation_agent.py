@@ -12,6 +12,7 @@ import datetime
 import json
 import os
 import random
+import re
 from typing import Annotated, Any, TypedDict
 
 import httpx
@@ -165,159 +166,265 @@ class CustomerValidationAgent(BaseAgent):
         Runs a live simulation of customer interviews and streams them.
         Injects full research context for highly realistic feedback.
         """
-        # Build the comprehensive context block
-        context_parts = [
-            f"PRODUCT VISION:\n{refined_idea.elevator_pitch}",
-            f"PROBLEM STATEMENT:\n{refined_idea.problem_statement}",
-            f"PROPOSED SOLUTION:\n{refined_idea.solution_hypothesis}"
+        dossier_summary = self._build_interview_dossier(
+            refined_idea=refined_idea,
+            market_research_text=market_research_text,
+            competitor_analysis_text=competitor_analysis_text,
+            ux_flow_text=ux_flow_text,
+            ui_spec_text=ui_spec_text,
+            visibility_text=visibility_text,
+            scoring_text=scoring_text,
+        )
+        full_research_dossier = dossier_summary["dossier"]
+        research_highlights = dossier_summary["highlights"]
+
+        archetypes = [
+            "Early Adopter",
+            "Skeptical Stakeholder",
+            "Industry Veteran",
+            "Cost-Conscious User",
+            "Practical Implementer",
         ]
         
-        if market_research_text:
-            context_parts.append(f"MARKET INSIGHTS:\n{market_research_text[:2000]}...")
-        if competitor_analysis_text:
-            context_parts.append(f"COMPETITOR GAPS:\n{competitor_analysis_text[:2000]}...")
-        if ux_flow_text:
-            context_parts.append(f"USER JOURNEY:\n{ux_flow_text[:2000]}...")
-        if ui_spec_text:
-            context_parts.append(f"VISUAL PROTOTYPE:\n{ui_spec_text[:2000]}...")
-        if scoring_text:
-            context_parts.append(f"VALIDATION AUDIT:\n{scoring_text[:1000]}...")
-
-        full_research_dossier = "\n\n---\n\n".join(context_parts)
-
-        # 1. Ask the LLM to identify the most relevant archetypes for this specific product
-        archetype_prompt = f"""
-You are a customer research strategist. Based on the product dossier below, identify exactly 7 distinct customer archetypes that would be most insightful to interview.
-
-Each archetype should represent a meaningfully different perspective, motivation, or pain point relevant to this specific product — not generic archetypes.
-
-Product Dossier:
-{full_research_dossier[:3000]}
-
-Return ONLY a valid JSON array of 7 strings, each being a short archetype name (2-4 words).
-Example: ["Early Adopter", "Skeptical Enterprise Buyer", "Budget-Conscious SMB Owner", "Technical Power User", "Compliance-Driven Manager", "First-Time User", "Industry Veteran"]
-"""
-        TARGET_COUNT = 7
-        FALLBACK_ARCHETYPES = ["Early Adopter", "Skeptical Stakeholder", "Industry Veteran", "Cost-Conscious User", "Practical Implementer", "Visionary Innovator", "Risk-Averse Buyer"]
-
-        archetype_res, _ = await self._llm.generate(archetype_prompt, temperature=0.7)
-        try:
-            clean = archetype_res.strip()
-            if "```json" in clean:
-                clean = clean.split("```json")[1].split("```")[0].strip()
-            elif "```" in clean:
-                clean = clean.split("```")[1].strip()
-            archetypes = json.loads(clean)
-            if not isinstance(archetypes, list) or len(archetypes) == 0:
-                raise ValueError("Invalid archetype list")
-            # Pad with fallback archetypes if LLM returned fewer than TARGET_COUNT
-            if len(archetypes) < TARGET_COUNT:
-                existing = set(a.lower() for a in archetypes)
-                for fb in FALLBACK_ARCHETYPES:
-                    if len(archetypes) >= TARGET_COUNT:
-                        break
-                    if fb.lower() not in existing:
-                        archetypes.append(fb)
-            # Trim to exactly TARGET_COUNT
-            archetypes = archetypes[:TARGET_COUNT]
-        except Exception:
-            archetypes = FALLBACK_ARCHETYPES
-        
-        interview_responses: list[str] = []
-
         for archetype in archetypes:
-            # 2. Generate a persona context via Pioneer API
-            try:
-                ctx_data = await self._generate_persona_via_pioneer(archetype, full_research_dossier)
-                if not ctx_data.get("name") or ctx_data["name"].startswith("User_"):
-                    ctx_data["name"] = ctx_data.get("full_name") or ctx_data.get("persona_name") or f"{archetype} Respondent"
-            except Exception:
-                ctx_data = {"name": f"{archetype} Respondent", "role": archetype, "background": "Unknown", "values": "Efficiency"}
+            ctx_prompt = f"""
+            Create a unique person profile for a user interview.
+            This persona MUST embody the archetype: '{archetype}'.
+            Focus on role, lived context, objections, purchase behavior, and what they value in a solution.
+
+            PRODUCT DOSSIER:
+            {full_research_dossier[:5000]}
+
+            Return ONLY valid JSON with these keys:
+            - name
+            - role
+            - company_or_context
+            - background
+            - values (array of short strings)
+            - pain_points (array of short strings)
+            - interview_style
+            - quote_seed
+            """
+            ctx_res, _ = await self._llm.generate(ctx_prompt, temperature=0.8)
+            ctx_data = self._parse_persona_json(ctx_res, archetype)
 
             user = SyntheticUser(
                 name=ctx_data.get("name", "User"),
                 archetype=archetype,
                 ocean=self._generate_ocean_profile(archetype),
-                context=ctx_data
+                context=ctx_data,
             )
 
-            # 3. Conduct the interview
+            focus_points = self._persona_focus_points(ctx_data)
+            yield {
+                "event": "persona_created",
+                "user": user.model_dump(),
+                "focus_points": focus_points,
+                "research_highlights": research_highlights,
+                "is_complete": False,
+            }
+
             system = (
-                f"You are {ctx_data.get('name', user.name)}, {ctx_data.get('role', '')}. {ctx_data.get('background', '')}\n\n"
-                "You have just been shown a new product feature as part of an A/B test. "
-                "Respond purely as a real user who has been using this feature or a prototype of it. "
-                "Ground your response entirely in YOUR personal experience: "
-                "what you noticed, what felt intuitive or confusing, whether it solved a problem you actually have, "
-                "and whether you would keep using it or go back to the old way. "
-                "Do NOT give strategic advice or ask what the product team plans to do. "
-                "Do NOT speak as an analyst, consultant, or investor. "
-                "Speak like a real person reacting to something they just tried — honest, personal, specific. "
-                "Reference your own habits, past frustrations, or similar products you've used. "
-                "2-3 conversational paragraphs."
+                f"Identity: {user.bio()}\n"
+                "You are participating in a deep-dive interview about a new product idea and its technical/market research. "
+                "You have been shown the vision, the market data, and even the proposed UX/UI prototypes. "
+                "Be authentic to your persona. If you are a skeptic, challenge the assumptions in the research. "
+                "If you are an industry veteran, comment on the market fit and competitor gaps. "
+                "Keep your response visceral and honest. Structure your answer naturally like a real interview: "
+                "1) immediate reaction, 2) what feels promising, 3) what blocks trust or adoption, 4) whether you would try or buy."
             )
             msg = (
-                f"You were part of an A/B test and just tried this new feature:\n\n{full_research_dossier[:3000]}\n\n"
-                "How did it feel to use it? Did it solve a problem you actually have? "
-                "Would you use it again, or would you go back to how you did things before?"
+                "Give me your honest, visceral reaction to this entire product dossier. "
+                "Reference concrete elements from the dossier when relevant.\n\n"
+                f"{full_research_dossier[:6000]}"
             )
             
-            # Use our centralized LLM provider for streaming the response
             full_response = ""
             async for chunk, _ in self._llm.stream(msg, system_prompt=system):
                 full_response += chunk
-                # Yield a partial update for the UI
                 yield {
+                    "event": "interview_chunk",
                     "user": user.model_dump(),
                     "chunk": chunk,
+                    "focus_points": focus_points,
                     "is_complete": False
                 }
             
             yield {
+                "event": "interview_complete",
                 "user": user.model_dump(),
                 "response": full_response,
+                "focus_points": focus_points,
+                "research_highlights": research_highlights,
                 "is_complete": True
             }
-            interview_responses.append(
-                f"### {ctx_data.get('name', archetype)} ({archetype})\n{full_response}"
-            )
-            # Small delay between interviews for dramatic effect and rate limiting
             await asyncio.sleep(1)
 
-        # 4. Generate synthesis report from all interview responses
-        combined_responses = "\n\n---\n\n".join(interview_responses)
-        report_prompt = f"""
-You are a senior UX researcher analysing A/B test feedback. You have just completed {len(archetypes)} user interviews for the following product feature:
+    async def run_follow_up_question(
+        self,
+        *,
+        user_payload: dict[str, Any],
+        question: str,
+        refined_idea: RefinedIdea,
+        prior_response: str = "",
+        market_research_text: str | None = None,
+        competitor_analysis_text: str | None = None,
+        ux_flow_text: str | None = None,
+        ui_spec_text: str | None = None,
+        visibility_text: str | None = None,
+        scoring_text: str | None = None,
+    ):
+        """Stream a follow-up answer from a previously generated persona."""
+        dossier_summary = self._build_interview_dossier(
+            refined_idea=refined_idea,
+            market_research_text=market_research_text,
+            competitor_analysis_text=competitor_analysis_text,
+            ux_flow_text=ux_flow_text,
+            ui_spec_text=ui_spec_text,
+            visibility_text=visibility_text,
+            scoring_text=scoring_text,
+        )
+        user = SyntheticUser.model_validate(user_payload)
+        prior_context = prior_response[:2500] if prior_response else "No prior interview transcript yet."
+        system = (
+            f"Identity: {user.bio()}\n"
+            "Stay fully in character as this persona. "
+            "You are answering a follow-up interview question after having already reviewed the product dossier. "
+            "Answer naturally, specifically, and concisely. Reference your role, concerns, and prior reaction when useful."
+        )
+        prompt = (
+            f"PRODUCT DOSSIER:\n{dossier_summary['dossier'][:4500]}\n\n"
+            f"YOUR PRIOR INTERVIEW RESPONSE:\n{prior_context}\n\n"
+            f"FOLLOW-UP QUESTION:\n{question}\n\n"
+            "Answer as the persona in 1-3 concise paragraphs."
+        )
 
-{full_research_dossier[:2000]}
-
-Here are the user interview transcripts:
-
-{combined_responses[:6000]}
-
-Write a comprehensive synthesis report in Markdown covering:
-1. **Feature Signal Score** — a 0–100 score reflecting overall user willingness to adopt this feature, with a one-line verdict
-2. **What Users Loved** — specific moments or aspects users responded positively to, with quotes
-3. **What Users Struggled With** — friction points, confusion, or things that felt unnecessary
-4. **Behavioural Patterns** — recurring habits or preferences across user types that shaped their reaction
-5. **User Segment Breakdown** — how each archetype responded (would adopt / neutral / would not adopt)
-6. **Recommended Iterations** — concrete, user-grounded changes to improve adoption based on the feedback
-
-Be direct and evidence-based. Ground every finding in what users actually said about their experience.
-"""
-        report_text = ""
-        async for chunk, _ in self._llm.stream(report_prompt):
-            report_text += chunk
+        full_response = ""
+        async for chunk, _ in self._llm.stream(prompt, system_prompt=system):
+            full_response += chunk
             yield {
-                "report_chunk": chunk,
-                "is_report": True,
+                "event": "follow_up_chunk",
+                "user": user.model_dump(),
+                "question": question,
+                "chunk": chunk,
                 "is_complete": False,
             }
 
         yield {
-            "report": report_text,
-            "is_report": True,
+            "event": "follow_up_complete",
+            "user": user.model_dump(),
+            "question": question,
+            "response": full_response,
             "is_complete": True,
         }
+
+    def _parse_persona_json(self, raw_text: str, archetype: str) -> dict[str, Any]:
+        """Parse persona JSON safely and provide a consistent fallback shape."""
+        clean_json = raw_text.strip()
+        if "```json" in clean_json:
+            clean_json = clean_json.split("```json", maxsplit=1)[1].split("```", maxsplit=1)[0].strip()
+        elif "```" in clean_json:
+            clean_json = clean_json.split("```", maxsplit=1)[1].strip()
+
+        try:
+            ctx_data = json.loads(clean_json)
+        except Exception:
+            ctx_data = {}
+
+        return {
+            "name": ctx_data.get("name") or f"User_{archetype.replace(' ', '_')}",
+            "role": ctx_data.get("role") or archetype,
+            "company_or_context": ctx_data.get("company_or_context") or "Independent evaluator",
+            "background": ctx_data.get("background") or "Evaluating the concept from their own working context.",
+            "values": self._normalize_string_list(ctx_data.get("values")) or ["Clarity", "Time savings"],
+            "pain_points": self._normalize_string_list(ctx_data.get("pain_points")) or ["Too many manual steps", "Unclear ROI"],
+            "interview_style": ctx_data.get("interview_style") or "direct but thoughtful",
+            "quote_seed": ctx_data.get("quote_seed") or "Show me why this matters in my real workflow.",
+        }
+
+    def _normalize_string_list(self, value: Any) -> list[str]:
+        if isinstance(value, list):
+            return [str(item).strip() for item in value if str(item).strip()]
+        if isinstance(value, str):
+            parts = [item.strip(" -") for item in re.split(r"[,;\n]", value) if item.strip()]
+            return [item for item in parts if item]
+        return []
+
+    def _persona_focus_points(self, ctx_data: dict[str, Any]) -> list[str]:
+        return [
+            *self._normalize_string_list(ctx_data.get("pain_points"))[:2],
+            *self._normalize_string_list(ctx_data.get("values"))[:2],
+        ][:4]
+
+    def _build_interview_dossier(
+        self,
+        *,
+        refined_idea: RefinedIdea,
+        market_research_text: str | None,
+        competitor_analysis_text: str | None,
+        ux_flow_text: str | None,
+        ui_spec_text: str | None,
+        visibility_text: str | None,
+        scoring_text: str | None,
+    ) -> dict[str, Any]:
+        """Build a compact but rich dossier so interviews feel grounded and specific."""
+        highlights = {
+            "product": refined_idea.value_proposition or refined_idea.elevator_pitch,
+            "audience": refined_idea.target_audience,
+            "business_model": refined_idea.business_model,
+            "market_signals": self._extract_bullets(market_research_text or "", limit=3),
+            "competitor_gaps": self._extract_bullets(competitor_analysis_text or "", limit=3),
+            "journey_steps": self._extract_bullets(ux_flow_text or "", limit=3),
+            "ui_moments": self._extract_bullets(ui_spec_text or "", limit=3),
+            "visibility_signals": self._extract_bullets(visibility_text or "", limit=2),
+            "decision_signals": self._extract_bullets(scoring_text or "", limit=2),
+        }
+
+        parts = [
+            self.build_context_block(
+                product_vision=refined_idea.elevator_pitch,
+                problem_statement=refined_idea.problem_statement,
+                proposed_solution=refined_idea.solution_hypothesis,
+                value_proposition=refined_idea.value_proposition,
+                target_audience=refined_idea.target_audience,
+                business_model=refined_idea.business_model,
+            )
+        ]
+
+        if market_research_text:
+            parts.append(f"## Market Insights\n{market_research_text[:1800]}")
+        if competitor_analysis_text:
+            parts.append(f"## Competitor Gaps\n{competitor_analysis_text[:1800]}")
+        if ux_flow_text:
+            parts.append(f"## User Journey\n{ux_flow_text[:1600]}")
+        if ui_spec_text:
+            parts.append(f"## Visual Prototype\n{ui_spec_text[:1600]}")
+        if visibility_text:
+            parts.append(f"## AI Visibility\n{visibility_text[:1000]}")
+        if scoring_text:
+            parts.append(f"## Decision Layer\n{scoring_text[:1000]}")
+
+        return {
+            "dossier": "\n\n---\n\n".join(parts),
+            "highlights": highlights,
+        }
+
+    def _extract_bullets(self, markdown: str, *, limit: int) -> list[str]:
+        if not markdown:
+            return []
+        bullets = [
+            line.strip()[2:].strip()
+            for line in markdown.splitlines()
+            if line.strip().startswith("- ")
+        ]
+        if bullets:
+            return bullets[:limit]
+        fallback = [
+            line.strip()
+            for line in markdown.splitlines()
+            if line.strip() and not line.strip().startswith("#")
+        ]
+        return fallback[:limit]
 
     # --- LangGraph Nodes (Keep for batch runs) ---
 

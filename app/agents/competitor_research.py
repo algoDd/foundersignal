@@ -42,14 +42,13 @@ class CompetitorResearchAgent(BaseAgent):
         if self._tavily:
             queries = [
                 f"competitors alternatives to {refined_idea.solution_hypothesis}",
-                f"best {refined_idea.target_audience} tools products startups",
-                f"{refined_idea.problem_statement} existing solutions companies",
+                f"best {refined_idea.target_audience} tools products startups existing solutions",
             ]
             for query in queries:
                 if len(query) > 380:
                     query = query[:380] + "..."
 
-                answer, results = self._tavily.search_and_extract(query, max_results=5)
+                answer, results = self._tavily.search_and_extract(query, max_results=4)
                 search_context += f"\n\n### Search: {query}\nAnswer: {answer}\n"
                 for r in results:
                     search_context += f"- [{r.title}]({r.url}): {r.content[:300]}\n"
@@ -78,12 +77,12 @@ class CompetitorResearchAgent(BaseAgent):
             "5. Executive summary\n"
         )
 
-        result = await self.generate_structured(prompt, CompetitorAnalysis)
+        result = await self.generate_structured(prompt, CompetitorAnalysis, max_tokens=4096)
         if source_urls:
             result.sources = list(set(source_urls + result.sources))
         return result
 
-    async def run_stream_text(self, *, refined_idea_text: str):
+    async def run_stream_text(self, *, refined_idea_text: str, feedback: str | None = None):
         """Research competitors based on refined idea text and stream markdown."""
         search_context = ""
         source_urls: list[str] = []
@@ -116,6 +115,8 @@ class CompetitorResearchAgent(BaseAgent):
             "Competitor Analysis Report in Markdown.\n\n"
             f"## Refined Concept\n{refined_idea_text}\n\n"
         )
+        if feedback:
+            prompt += f"## Human Feedback To Address\n{feedback}\n\n"
         if search_context:
             prompt += f"## Competitive Intelligence Data\n{search_context}\n"
 
@@ -127,6 +128,10 @@ class CompetitorResearchAgent(BaseAgent):
             "## Positioning Gaps\n"
             "## Differentiation Opportunities\n"
             "## Executive Summary\n"
+            "\nRules:\n"
+            "- Do not use markdown tables.\n"
+            "- Use bullets and short sub-sections instead.\n"
+            "- Keep each competitor readable and compact.\n"
         )
 
         async for chunk in self.stream_text(prompt):

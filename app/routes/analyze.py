@@ -12,8 +12,12 @@ from app.services.hera_service import get_hera_service
 from app.services.peec_service import get_peec_service
 from app.services.tavily_service import get_tavily_service
 
+from fastapi import APIRouter, HTTPException
+
 router = APIRouter()
 logger = logging.getLogger("foundersignal.routes.analyze")
+
+
 
 
 @router.post("/analyze", response_model=AnalyzeResponse)

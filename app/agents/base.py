@@ -17,6 +17,7 @@ from __future__ import annotations
 import logging
 import time
 from abc import ABC, abstractmethod
+from hashlib import sha256
 from typing import Any, TypeVar
 
 from pydantic import BaseModel
@@ -26,6 +27,9 @@ from app.services.llm.base import BaseLLMProvider, get_llm_provider
 T = TypeVar("T", bound=BaseModel)
 
 logger = logging.getLogger("foundersignal.agents")
+
+_TEXT_CACHE: dict[str, tuple[str, int]] = {}
+_STRUCTURED_CACHE: dict[str, tuple[str, int]] = {}
 
 
 class BaseAgent(ABC):
@@ -82,12 +86,20 @@ class BaseAgent(ABC):
             Generated text string.
         """
         self._logger.debug("Generating text — prompt length: %d", len(prompt))
+        cache_key = self._cache_key("text", prompt, self.system_prompt, temperature, max_tokens)
+        cached = _TEXT_CACHE.get(cache_key)
+        if cached is not None:
+            text, tokens = cached
+            self.tokens_used += tokens
+            return text
+
         text, tokens = await self._llm.generate(
             prompt,
             system_prompt=self.system_prompt,
             temperature=temperature,
             max_tokens=max_tokens,
         )
+        _TEXT_CACHE[cache_key] = (text, tokens)
         self.tokens_used += tokens
         return text
 
@@ -133,6 +145,20 @@ class BaseAgent(ABC):
             Parsed Pydantic model instance.
         """
         self._logger.debug("Generating structured output — model: %s", response_model.__name__)
+        cache_key = self._cache_key(
+            "structured",
+            prompt,
+            self.system_prompt,
+            temperature,
+            max_tokens,
+            response_model.__name__,
+        )
+        cached = _STRUCTURED_CACHE.get(cache_key)
+        if cached is not None:
+            raw_json, tokens = cached
+            self.tokens_used += tokens
+            return response_model.model_validate_json(raw_json)
+
         start = time.monotonic()
         result, tokens = await self._llm.generate_structured(
             prompt,
@@ -141,6 +167,7 @@ class BaseAgent(ABC):
             temperature=temperature,
             max_tokens=max_tokens,
         )
+        _STRUCTURED_CACHE[cache_key] = (result.model_dump_json(), tokens)
         self.tokens_used += tokens
         elapsed = time.monotonic() - start
         self._logger.info(
@@ -166,3 +193,25 @@ class BaseAgent(ABC):
                 label = key.replace("_", " ").title()
                 parts.append(f"## {label}\n{value}")
         return "\n\n".join(parts)
+
+    def _cache_key(
+        self,
+        mode: str,
+        prompt: str,
+        system_prompt: str,
+        temperature: float,
+        max_tokens: int,
+        extra: str = "",
+    ) -> str:
+        payload = "|".join(
+            [
+                self.name,
+                mode,
+                system_prompt,
+                str(temperature),
+                str(max_tokens),
+                extra,
+                prompt,
+            ]
+        )
+        return sha256(payload.encode("utf-8")).hexdigest()

@@ -18,6 +18,7 @@ dependencies = [
     "langchain-google-genai",
     "openai>=2.32.0",
     "websockets>=13.0",
+    "firebase-admin>=7.4.0",
 ]
 
 [project.optional-dependencies]

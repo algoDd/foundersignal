@@ -1,5 +1,7 @@
 """FounderSignal — Configuration via environment variables."""
 
+from functools import lru_cache
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -26,6 +28,7 @@ class Settings(BaseSettings):
     # -------------------------------------------------------------------------
     llm_provider: str = "gemini"  # Future: "openai", "anthropic"
     llm_model: str = "gemini-2.5-flash"
+    enable_model_verification: bool = False
 
     # -------------------------------------------------------------------------
     # Core API Keys
@@ -44,6 +47,18 @@ class Settings(BaseSettings):
     pioneer_api_key: str = ""
     pioneer_api_url: str = "https://api.pioneer.ai/v1/chat/completions"
     pioneer_model_id: str = ""
+    
+    # -------------------------------------------------------------------------
+    # Firebase
+    # -------------------------------------------------------------------------
+    firebase_api_key: str = ""
+    firebase_auth_domain: str = ""
+    firebase_project_id: str = ""
+    firebase_storage_bucket: str = ""
+    firebase_messaging_sender_id: str = ""
+    firebase_app_id: str = ""
+    cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
+
 
     # -------------------------------------------------------------------------
     # Helpers
@@ -57,6 +72,7 @@ class Settings(BaseSettings):
         return bool(self.peec_api_key)
 
 
+@lru_cache(maxsize=1)
 def get_settings() -> Settings:
     """Factory for Settings — cached at module level."""
     return Settings()

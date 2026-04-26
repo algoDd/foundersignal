@@ -1,0 +1,4 @@
+- Firebase persitance
+- token flow
+- agent flow
+- information flow between agents and to AA

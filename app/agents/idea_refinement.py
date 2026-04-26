@@ -62,7 +62,7 @@ class IdeaRefinementAgent(BaseAgent):
         return await self.generate_structured(prompt, RefinedIdea)
 
     async def run_stream(self, *, idea_input: IdeaInput, feedback: str | None = None):
-        """Refine a raw idea into a structured concept and stream the markdown output."""
+        """Refine a raw idea into a compact, checkpoint-friendly markdown brief."""
         context_parts = [f"Raw Idea: {idea_input.idea}"]
         if idea_input.target_region:
             context_parts.append(f"Target Region: {idea_input.target_region}")
@@ -80,16 +80,27 @@ class IdeaRefinementAgent(BaseAgent):
             "Analyze the following concept (startup idea, product, or feature) and "
             "produce a refined, structured report in Markdown format.\n\n"
             f"{chr(10).join(context_parts)}\n\n"
-            "Produce a professional, detailed report with the following sections:\n"
-            "# Refined Concept Analysis\n"
-            "## Problem Statement\n"
-            "## Solution Hypothesis\n"
-            "## Value Proposition\n"
-            "## Target Audience\n"
-            "## Recommended Business Model\n"
-            "## Key Assumptions\n"
-            "## Elevator Pitch\n"
-            "\nBe thorough and use professional formatting."
+            "Make the writing crisp, concrete, and easy to follow. It should feel like a real product idea, "
+            "not a vague brainstorm. Avoid rambling. Explain enough detail to make the idea believable.\n"
+            "Do not use markdown tables. Use paragraphs and bullets only.\n"
+            "Use this exact structure:\n"
+            "# Idea Refinement Checkpoint\n"
+            "## Problem\n"
+            "Write one tight paragraph that explains the current pain, who feels it, and why it matters now.\n"
+            "## Solution\n"
+            "Write one tight paragraph that explains what the product does, how it works at a high level, and what makes it feel concrete.\n"
+            "## Why It Wins\n"
+            "Write exactly 3 bullets. Each bullet should explain a real advantage, not a slogan.\n"
+            "## Best Early User\n"
+            "Write 2-3 bullets describing the first users in practical terms: role, context, and trigger to buy.\n"
+            "## Business Model\n"
+            "Write one short paragraph with the likely pricing motion and why it fits this buyer.\n"
+            "## Assumptions To Validate\n"
+            "Write exactly 3 bullets. Each should be a real assumption that could break the business if wrong.\n"
+            "## Draft Pitch\n"
+            "Write one short paragraph that sounds like a real founder explanation.\n"
+            "## Checkpoint\n"
+            "End with a one-line recommendation telling the user whether to proceed or refine further."
         )
 
         async for chunk in self.stream_text(prompt):

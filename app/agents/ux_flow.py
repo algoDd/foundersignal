@@ -98,6 +98,9 @@ class UXFlowAgent(BaseAgent):
             "## The Core Loop (What keeps them coming back)\n"
             "## Emotional Arc (How the user feels at each stage)\n"
             "## Key Feature Roadmap (MoSCoW - simplified for humans)\n"
+            "\nRules:\n"
+            "- Do not use markdown tables.\n"
+            "- For the roadmap, use flat bullets in this format: `Must Have: feature - why it matters`.\n"
         )
 
         async for chunk in self.stream_text(prompt):

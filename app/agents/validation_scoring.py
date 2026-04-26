@@ -61,7 +61,7 @@ class ValidationScoringAgent(BaseAgent):
             "key_risks (3-5), next_steps (3-5), and summary."
         )
 
-        return await self.generate_structured(prompt, ValidationScore)
+        return await self.generate_structured(prompt, ValidationScore, max_tokens=2048)
 
     async def run_stream_text(
         self,

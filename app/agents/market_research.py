@@ -41,14 +41,13 @@ class MarketResearchAgent(BaseAgent):
             # Run targeted searches
             queries = [
                 f"{refined_idea.problem_statement} market size TAM 2025 2026",
-                f"{refined_idea.target_audience} industry trends growth",
-                f"{refined_idea.solution_hypothesis} market opportunity",
+                f"{refined_idea.target_audience} industry trends growth market opportunity",
             ]
             for query in queries:
                 if len(query) > 380:
                     query = query[:380] + "..."
 
-                answer, results = self._tavily.search_and_extract(query, max_results=5)
+                answer, results = self._tavily.search_and_extract(query, max_results=4)
                 search_context += f"\n\n### Search: {query}\nAnswer: {answer}\n"
                 for r in results:
                     search_context += f"- [{r.title}]({r.url}): {r.content[:300]}\n"
@@ -78,12 +77,12 @@ class MarketResearchAgent(BaseAgent):
             "7. Executive summary\n"
         )
 
-        result = await self.generate_structured(prompt, MarketResearch)
+        result = await self.generate_structured(prompt, MarketResearch, max_tokens=4096)
         if source_urls:
             result.sources = list(set(source_urls + result.sources))
         return result
 
-    async def run_stream_text(self, *, refined_idea_text: str):
+    async def run_stream_text(self, *, refined_idea_text: str, feedback: str | None = None):
         """Research the market based on refined idea text and stream markdown."""
         search_context = ""
         source_urls: list[str] = []
@@ -118,6 +117,8 @@ class MarketResearchAgent(BaseAgent):
             "Market Research Report in Markdown.\n\n"
             f"## Refined Concept\n{refined_idea_text}\n\n"
         )
+        if feedback:
+            prompt += f"## Human Feedback To Address\n{feedback}\n\n"
         if search_context:
             prompt += f"## Real-Time Market Data\n{search_context}\n"
 
@@ -130,6 +131,11 @@ class MarketResearchAgent(BaseAgent):
             "## Risks\n"
             "## Key Data Points & Sources\n"
             "## Executive Summary\n"
+            "\nRules:\n"
+            "- Do not use markdown tables.\n"
+            "- Use bullets and short labeled lists for metrics and sources.\n"
+            "- Every data point should be readable in plain markdown.\n"
+            "- If a number is uncertain, say it is an estimate instead of inventing precision.\n"
         )
 
         async for chunk in self.stream_text(prompt):

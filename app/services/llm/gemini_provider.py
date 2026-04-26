@@ -1,12 +1,17 @@
 import asyncio
 import logging
-import random
+from functools import partial
 
 from google import genai
 from google.genai import types
 from google.genai.errors import ClientError
+from tenacity import retry, wait_exponential, stop_after_attempt, retry_if_exception
 
 from app.services.llm.base import BaseLLMProvider
+
+def is_rate_limit_error(exception):
+    return isinstance(exception, ClientError) and ("429" in str(exception) or "RESOURCE_EXHAUSTED" in str(exception))
+
 
 logger = logging.getLogger("foundersignal.llm.gemini")
 
@@ -22,6 +27,15 @@ class GeminiProvider(BaseLLMProvider):
         self._model = model
         logger.info("Gemini provider ready — model: %s", model)
 
+    @retry(
+        wait=wait_exponential(multiplier=1, min=2, max=30),
+
+        stop=stop_after_attempt(5),
+        retry=retry_if_exception(is_rate_limit_error),
+        before_sleep=lambda retry_state: logger.warning(
+            f"Gemini Rate Limit hit, retrying in {retry_state.next_action.sleep}s... (Attempt {retry_state.attempt_number})"
+        )
+    )
     async def generate(
         self,
         prompt: str,
@@ -30,7 +44,7 @@ class GeminiProvider(BaseLLMProvider):
         temperature: float = 0.7,
         max_tokens: int = 8192,
     ) -> tuple[str, int]:
-        """Generate text using Gemini."""
+        """Generate text using Gemini with automatic retries."""
         config = types.GenerateContentConfig(
             temperature=temperature,
             max_output_tokens=max_tokens,
@@ -39,35 +53,25 @@ class GeminiProvider(BaseLLMProvider):
         if system_prompt:
             config.system_instruction = system_prompt
 
-        max_retries = 5
-        retry_delay = 5
-        for i in range(max_retries):
-            try:
-                response = self._client.models.generate_content(
-                    model=self._model,
-                    contents=prompt,
-                    config=config,
-                )
-                tokens = response.usage_metadata.total_token_count if response.usage_metadata else 0
-                return response.text or "", tokens
-            except ClientError as e:
-                is_rate_limit = "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e)
-                if i < max_retries - 1 and is_rate_limit:
-                    sleep_time = retry_delay + random.uniform(0, 1)  # noqa: S311
-                    logger.warning(
-                        "Gemini 429 hit, retrying in %.2fs... (Attempt %d/%d)",
-                        sleep_time,
-                        i + 1,
-                        max_retries,
-                    )
-                    await asyncio.sleep(sleep_time)
-                    retry_delay *= 2
-                    continue
-                logger.error("Gemini error (generate): %s", e)
-                raise
+        response = await asyncio.to_thread(
+            partial(
+                self._client.models.generate_content,
+                model=self._model,
+                contents=prompt,
+                config=config,
+            )
+        )
+        tokens = response.usage_metadata.total_token_count if response.usage_metadata else 0
+        return response.text or "", tokens
 
-        return "", 0
-
+    @retry(
+        wait=wait_exponential(multiplier=1, min=2, max=30),
+        stop=stop_after_attempt(5),
+        retry=retry_if_exception(is_rate_limit_error),
+        before_sleep=lambda retry_state: logger.warning(
+            f"Gemini Rate Limit hit (stream), retrying in {retry_state.next_action.sleep}s... (Attempt {retry_state.attempt_number})"
+        )
+    )
     async def stream(
         self,
         prompt: str,
@@ -76,7 +80,7 @@ class GeminiProvider(BaseLLMProvider):
         temperature: float = 0.7,
         max_tokens: int = 8192,
     ):
-        """Stream text generation from Gemini."""
+        """Stream text generation from Gemini with automatic retries."""
         config = types.GenerateContentConfig(
             temperature=temperature,
             max_output_tokens=max_tokens,
@@ -85,35 +89,19 @@ class GeminiProvider(BaseLLMProvider):
         if system_prompt:
             config.system_instruction = system_prompt
 
-        max_retries = 5
-        retry_delay = 5
-        for i in range(max_retries):
-            try:
-                response_stream = self._client.models.generate_content_stream(
-                    model=self._model,
-                    contents=prompt,
-                    config=config,
-                )
-                for chunk in response_stream:
-                    text = chunk.text or ""
-                    tokens = chunk.usage_metadata.total_token_count if chunk.usage_metadata else 0
-                    yield text, tokens
-                return
-            except ClientError as e:
-                is_rate_limit = "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e)
-                if i < max_retries - 1 and is_rate_limit:
-                    sleep_time = retry_delay + random.uniform(0, 1)  # noqa: S311
-                    logger.warning(
-                        "Gemini 429 hit (stream), retrying in %.2fs... (Attempt %d/%d)",
-                        sleep_time,
-                        i + 1,
-                        max_retries,
-                    )
-                    await asyncio.sleep(sleep_time)
-                    retry_delay *= 2
-                    continue
-                logger.error("Gemini error (stream): %s", e)
-                raise
+        response_stream = await asyncio.to_thread(
+            partial(
+                self._client.models.generate_content_stream,
+                model=self._model,
+                contents=prompt,
+                config=config,
+            )
+        )
+        for chunk in response_stream:
+            text = chunk.text or ""
+            tokens = chunk.usage_metadata.total_token_count if chunk.usage_metadata else 0
+            yield text, tokens
+
 
     async def close(self) -> None:
         """No persistent connection to close for Gemini REST client."""

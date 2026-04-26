@@ -5,11 +5,16 @@ from __future__ import annotations
 import logging
 
 import httpx
+from tenacity import retry, wait_exponential, stop_after_attempt, retry_if_exception
 
 logger = logging.getLogger("foundersignal.services.hera")
 
 HERA_BASE_URL = "https://api.hera.video/v1"
+_SERVICE_INSTANCE: HeraService | None = None
 
+
+def is_rate_limit_error(exception):
+    return isinstance(exception, httpx.HTTPStatusError) and exception.response.status_code == 429
 
 class HeraService:
     """Client for the Hera Video API (motion graphics generation)."""
@@ -29,6 +34,14 @@ class HeraService:
         )
         logger.info("Hera service initialized")
 
+    @retry(
+        wait=wait_exponential(multiplier=1, min=2, max=30),
+        stop=stop_after_attempt(5),
+        retry=retry_if_exception(is_rate_limit_error),
+        before_sleep=lambda retry_state: logger.warning(
+            f"Hera Rate Limit hit (create), retrying in {retry_state.next_action.sleep}s... (Attempt {retry_state.attempt_number})"
+        ),
+    )
     async def create_video(
         self,
         prompt: str,
@@ -39,19 +52,7 @@ class HeraService:
         fps: str = "30",
         reference_image_urls: list[str] | None = None,
     ) -> dict:
-        """Submit a motion graphics video generation job.
-
-        Args:
-            prompt: Text prompt describing the video to generate.
-            duration_seconds: Video duration (1-60 seconds).
-            aspect_ratio: Output aspect ratio.
-            resolution: Output resolution.
-            fps: Frames per second.
-            reference_image_urls: Optional reference images.
-
-        Returns:
-            Dict with 'video_id' and 'project_url'.
-        """
+        """Submit a video generation job with retries."""
         payload: dict = {
             "prompt": prompt,
             "outputs": [
@@ -72,8 +73,16 @@ class HeraService:
         response.raise_for_status()
         return response.json()
 
+    @retry(
+        wait=wait_exponential(multiplier=1, min=2, max=30),
+        stop=stop_after_attempt(5),
+        retry=retry_if_exception(is_rate_limit_error),
+        before_sleep=lambda retry_state: logger.warning(
+            f"Hera Rate Limit hit (status), retrying in {retry_state.next_action.sleep}s... (Attempt {retry_state.attempt_number})"
+        ),
+    )
     async def get_video_status(self, video_id: str) -> dict:
-        """Check the status of a video generation job.
+        """Check the status of a video generation job with retries.
 
         Args:
             video_id: The video job ID returned from create_video.
@@ -81,6 +90,7 @@ class HeraService:
         Returns:
             Dict with status information.
         """
+
         logger.info("Hera status check: %s", video_id)
         response = await self._client.get(f"/videos/{video_id}")
         response.raise_for_status()
@@ -93,10 +103,13 @@ class HeraService:
 
 def get_hera_service() -> HeraService | None:
     """Factory — returns HeraService or None if key is missing."""
+    global _SERVICE_INSTANCE  # noqa: PLW0603
     from app.config import get_settings
 
     settings = get_settings()
     if not settings.has_hera:
         logger.info("Hera API key not set — video features disabled")
         return None
-    return HeraService(api_key=settings.hera_api_key)
+    if _SERVICE_INSTANCE is None:
+        _SERVICE_INSTANCE = HeraService(api_key=settings.hera_api_key)
+    return _SERVICE_INSTANCE

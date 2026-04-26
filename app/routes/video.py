@@ -7,8 +7,12 @@ from fastapi import APIRouter, HTTPException
 from app.models.schemas import VideoStatusResponse
 from app.services.hera_service import get_hera_service
 
+from fastapi import APIRouter, HTTPException
+
 router = APIRouter()
 logger = logging.getLogger("foundersignal.routes.video")
+
+
 
 
 @router.get("/video/{video_id}", response_model=VideoStatusResponse)
