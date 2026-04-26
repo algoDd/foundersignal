@@ -17,7 +17,7 @@ from app.agents.ux_flow import UXFlowAgent
 from app.agents.validation_scoring import ValidationScoringAgent
 from app.models.schemas import IdeaInput
 from app.services.hera_service import get_hera_service
-from app.services.firebase_admin import get_current_user
+from app.services.supabase_service import get_current_user
 from app.services.peec_service import get_peec_service
 from app.services.tavily_service import get_tavily_service
 from app.services.persistence import persistence

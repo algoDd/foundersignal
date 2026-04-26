@@ -3,7 +3,6 @@ import {
   Activity,
   Sparkles,
   Target,
-  Zap,
   CheckCircle2,
   Cpu,
   BarChart3,
@@ -153,7 +152,7 @@ function deriveSessionTitle(session: any) {
   const pitch = extractMarkdownSection(refineText, "Draft Pitch");
   if (pitch) return pitch.replace(/\n+/g, " ").slice(0, 90);
 
-  return "Untitled session";
+  return "New startup idea";
 }
 
 // ── Main App ───────────────────────────────────────────────────────────────
@@ -179,8 +178,20 @@ export default function App() {
   const [selectedInterviewIndex, setSelectedInterviewIndex] = useState<
     number | null
   >(null);
+  const [showHome, setShowHome] = useState(true);
   const [isSimulating, setIsSimulating] = useState(false);
   const interviewBuffers = useRef<Record<string, string>>({});
+  const sessionIdRef = useRef<string | null>(null);
+  const sessionCreatedAtRef = useRef<string | null>(null);
+  const snapshotRef = useRef({
+    idea: "",
+    results: {} as Record<string, string>,
+    status: {} as Record<string, "pending" | "running" | "completed" | "error">,
+    tokens: {} as Record<string, number>,
+    searches: {} as Record<string, any[]>,
+    interviews: [] as any[],
+    interviewReport: "",
+  });
   const [chatHistories, setChatHistories] = useState<Record<string, {role: string, content: string}[]>>({});
   const [chatInput, setChatInput] = useState("");
   const [chatLoading, setChatLoading] = useState(false);
@@ -231,6 +242,18 @@ export default function App() {
       setContentMode("dashboard");
     }
   }, [activeTab]);
+
+  useEffect(() => {
+    snapshotRef.current = {
+      idea,
+      results,
+      status,
+      tokens,
+      searches,
+      interviews,
+      interviewReport,
+    };
+  }, [idea, results, status, tokens, searches, interviews, interviewReport]);
 
   useEffect(() => {
     fetchSessions();
@@ -307,6 +330,8 @@ export default function App() {
       const d = await r.json();
       setIdea(d.input?.idea || d.idea || "");
       setCurrentSessionId(d.report_id || sessionId);
+      sessionIdRef.current = d.report_id || sessionId;
+      sessionCreatedAtRef.current = d.created_at || null;
       setResults(d.results_map || {});
       setStatus(d.status_map || {});
       setTokens(d.tokens_map || {});
@@ -314,6 +339,7 @@ export default function App() {
       setInterviews(d.interviews || []);
       setInterviewReport(d.interview_report || "");
       setSelectedInterviewIndex((d.interviews || []).length ? 0 : null);
+      setShowHome(false);
       setActiveTab("overview");
       setGlobalError(null);
     } catch (error: any) {
@@ -331,26 +357,44 @@ export default function App() {
   ) => {
     if (!authToken) return;
     try {
-      const id = currentSessionId || Math.random().toString(36).slice(7);
+      const id =
+        sessionIdRef.current ||
+        currentSessionId ||
+        `session_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      const createdAt = sessionCreatedAtRef.current || new Date().toISOString();
+      sessionIdRef.current = id;
+      sessionCreatedAtRef.current = createdAt;
       await fetch(`${API_BASE}/agents/sessions/save`, {
         method: "POST",
         headers: getHeaders(true),
         body: JSON.stringify({
           report_id: id,
-          title: idea.trim().slice(0, 90),
-          input: { idea },
+          title: (snapshotRef.current.idea || idea).trim().slice(0, 90),
+          input: { idea: snapshotRef.current.idea || idea },
           results_map: r,
           status_map: s,
           tokens_map: t,
           searches_map: se,
           interviews: interviewItems,
           interview_report: reportText,
-          created_at: new Date().toISOString(),
+          created_at: createdAt,
         }),
       });
       setCurrentSessionId(id);
       fetchSessions();
     } catch {}
+  };
+
+  const checkpointSave = async () => {
+    const snapshot = snapshotRef.current;
+    await saveCurrentSession(
+      snapshot.results,
+      snapshot.status,
+      snapshot.tokens,
+      snapshot.searches,
+      snapshot.interviews,
+      snapshot.interviewReport,
+    );
   };
 
   const submitAuth = async () => {
@@ -395,6 +439,16 @@ export default function App() {
   };
 
   const goHome = () => {
+    snapshotRef.current = {
+      idea: "",
+      results: {},
+      status: {},
+      tokens: {},
+      searches: {},
+      interviews: [],
+      interviewReport: "",
+    };
+    setShowHome(true);
     setIdea("");
     setResults({});
     setStatus({});
@@ -404,7 +458,18 @@ export default function App() {
     setInterviewReport("");
     setSelectedInterviewIndex(null);
     setCurrentSessionId(null);
+    sessionIdRef.current = null;
+    sessionCreatedAtRef.current = null;
+    setAgentTimestamps({});
     setIsSimulating(false);
+    setIsOrchestrating(false);
+    setChatHistories({});
+    setChatInput("");
+    setChatLoading(false);
+    setChatOpen(false);
+    setSearchQuery("");
+    interviewBuffers.current = {};
+    tts.stop();
     setGlobalError(null);
     setActiveTab("overview");
     setContentMode("dashboard");
@@ -473,7 +538,19 @@ export default function App() {
 
   const startInterviews = async () => {
     if (isSimulating) return;
+    setShowHome(false);
     setIsSimulating(true);
+    if (!sessionIdRef.current) {
+      sessionIdRef.current = `session_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      sessionCreatedAtRef.current = new Date().toISOString();
+      setCurrentSessionId(sessionIdRef.current);
+    }
+    snapshotRef.current = {
+      ...snapshotRef.current,
+      interviews: [],
+      interviewReport: "",
+    };
+    await checkpointSave();
     setInterviews([]);
     setInterviewReport('');
     interviewBuffers.current = {};
@@ -552,6 +629,7 @@ export default function App() {
       setGlobalError(e.message);
     } finally {
       setIsSimulating(false);
+      await checkpointSave();
     }
   };
 
@@ -628,6 +706,21 @@ export default function App() {
 
   const startAnalysis = async () => {
     if (isOrchestrating || !idea.trim()) return;
+    setShowHome(false);
+    if (!sessionIdRef.current) {
+      sessionIdRef.current = `session_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      sessionCreatedAtRef.current = new Date().toISOString();
+      setCurrentSessionId(sessionIdRef.current);
+    }
+    snapshotRef.current = {
+      idea,
+      results: {},
+      status: {},
+      tokens: {},
+      searches: {},
+      interviews: [],
+      interviewReport: "",
+    };
     setIsOrchestrating(true);
     setResults({});
     setStatus({});
@@ -640,12 +733,15 @@ export default function App() {
     setActiveTab("overview");
     setGlobalError(null);
     try {
+      await checkpointSave();
       const refined = await streamAgent("refine", { idea });
+      await checkpointSave();
       await new Promise((r) => setTimeout(r, 500));
       const [market, comp] = await Promise.all([
         streamAgent("market", { refined_idea: refined }),
         streamAgent("competitors", { refined_idea: refined }),
       ]);
+      await checkpointSave();
       const [ux] = await Promise.all([
         streamAgent("ux", { refined_idea: refined, market_research: market }),
         streamAgent("scoring", {
@@ -654,17 +750,21 @@ export default function App() {
           competitor_research: comp,
         }),
       ]);
+      await checkpointSave();
       await new Promise((r) => setTimeout(r, 500));
       await streamAgent("visibility", {
         refined_idea: refined,
         competitor_research: comp,
       });
+      await checkpointSave();
       await streamAgent("ui", { refined_idea: refined, ux_flow: ux });
-      await saveCurrentSession(results, status, tokens, searches);
+      await checkpointSave();
     } catch (e: any) {
       setGlobalError(e.message || "Pipeline interrupted.");
+      await checkpointSave();
     } finally {
       setIsOrchestrating(false);
+      await checkpointSave();
     }
   };
 
@@ -687,7 +787,7 @@ export default function App() {
     );
   }
 
-  if (!hasResults && !isOrchestrating) {
+  if ((showHome || !hasResults) && !isOrchestrating) {
     return (
       <HomeScreen
         idea={idea}
@@ -1598,7 +1698,7 @@ export default function App() {
                             className="template-name"
                             style={{ fontSize: "0.8rem" }}
                           >
-                            {s.title?.slice(0, 50) || s.idea?.slice(0, 50) || "Untitled"}
+                            {s.title?.slice(0, 50) || s.idea?.slice(0, 50) || "New startup idea"}
                           </div>
                           <div className="template-desc">
                             {new Date(s.created_at).toLocaleDateString()}

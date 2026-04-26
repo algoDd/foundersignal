@@ -2,6 +2,7 @@
 
 from functools import lru_cache
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -12,6 +13,7 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore",
+        populate_by_name=True,
     )
 
     # -------------------------------------------------------------------------
@@ -49,14 +51,12 @@ class Settings(BaseSettings):
     pioneer_model_id: str = ""
     
     # -------------------------------------------------------------------------
-    # Firebase
+    # Supabase
     # -------------------------------------------------------------------------
-    firebase_api_key: str = ""
-    firebase_auth_domain: str = ""
-    firebase_project_id: str = ""
-    firebase_storage_bucket: str = ""
-    firebase_messaging_sender_id: str = ""
-    firebase_app_id: str = ""
+    supabase_url: str = ""
+    supabase_key: str = ""
+    supabase_secret_key: str = Field(default="", validation_alias="SUPABAS_SECRET_KEY")
+    db_pass: str = ""
     allow_dev_auth_bypass: bool = False
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
 
@@ -71,6 +71,10 @@ class Settings(BaseSettings):
     @property
     def has_peec(self) -> bool:
         return bool(self.peec_api_key)
+
+    @property
+    def has_supabase(self) -> bool:
+        return bool(self.supabase_url and self.supabase_key)
 
 
 @lru_cache(maxsize=1)

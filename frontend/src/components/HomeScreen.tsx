@@ -107,7 +107,7 @@ export function HomeScreen({
                     >
                       <div className="home-session-rank">0{index + 1}</div>
                       <div className="home-session-copy">
-                        <div className="home-session-idea">{session.title?.trim() || session.idea?.trim() || "Untitled"}</div>
+                        <div className="home-session-idea">{session.title?.trim() || session.idea?.trim() || "New startup idea"}</div>
                         <div className="home-session-meta">{formatSessionDate(session.created_at)}</div>
                       </div>
                       <ArrowRight size={15} />

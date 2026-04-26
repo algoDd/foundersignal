@@ -22,6 +22,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logger.info("Tavily: %s", "✅" if settings.tavily_api_key else "❌ missing")
     logger.info("Hera: %s", "✅" if settings.has_hera else "⏭ skipped")
     logger.info("Peec AI: %s", "✅" if settings.has_peec else "⏭ skipped")
+    logger.info("Supabase: %s", "✅" if settings.has_supabase else "❌ missing")
     yield
     logger.info("FounderSignal shutting down.")
 
