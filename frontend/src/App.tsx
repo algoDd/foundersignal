@@ -812,10 +812,9 @@ export default function App() {
                 const s = item.status;
                 const clickable =
                   item.id === "overview" ||
+                  item.id === "interviews" ||
                   s === "completed" ||
-                  s === "running" ||
-                  (item.id === "interviews" &&
-                    (interviews.length > 0 || isSimulating));
+                  s === "running";
                 const badge =
                   s === "running"
                     ? "running"
@@ -1130,6 +1129,7 @@ export default function App() {
                           !results['refine']      && 'Idea Refinement',
                           !results['market']      && 'Market Research',
                           !results['competitors'] && 'Competitor Analysis',
+                          !results['ui']          && 'Visual Prototype',
                         ].filter(Boolean) as string[];
                         const canStart = missing.length === 0 && !isSimulating;
                         return (
@@ -1706,7 +1706,33 @@ export default function App() {
           )}
 
           {/* ── Interviews tab ── */}
-          {activeTab === "interviews" && (
+          {activeTab === "interviews" && (() => {
+            const missingForInterviews = [
+              !results['refine']      && 'Idea Refinement',
+              !results['market']      && 'Market Research',
+              !results['competitors'] && 'Competitor Analysis',
+              !results['ui']          && 'Visual Prototype',
+            ].filter(Boolean) as string[];
+            if (missingForInterviews.length > 0 && interviews.length === 0 && !isSimulating) {
+              return (
+                <div className="fade-in" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: 16, padding: '60px 32px', textAlign: 'center' }}>
+                  <Users size={40} style={{ opacity: 0.25 }} />
+                  <div style={{ fontWeight: 600, fontSize: '1rem' }}>Interviews not ready yet</div>
+                  <div style={{ fontSize: '0.83rem', color: 'var(--text-muted)', maxWidth: 360 }}>
+                    Customer interviews will run once the following steps are complete:
+                  </div>
+                  <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {missingForInterviews.map((step) => (
+                      <li key={step} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.83rem', color: 'var(--warning)', fontWeight: 600 }}>
+                        <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--warning)', flexShrink: 0 }} />
+                        {step}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              );
+            }
+            return (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }} className="fade-in">
             <div className="interview-wrap">
               <div className="interview-list">
@@ -1924,7 +1950,8 @@ export default function App() {
               </div>
             )}
             </div>
-          )}
+            );
+          })()}
         </div>
       </main>
 
