@@ -777,16 +777,15 @@ export default function App() {
           <div className="nav-credits-title">Powered by</div>
           <div className="nav-credit-item">
             <div className="nav-credit-dot" style={{ background: "#7c3aed" }} />
-            <span className="nav-credit-brand">Gradium</span> for Voice Agents
+            <span className="nav-credit-brand">Gradium:</span> Voice Agents
           </div>
           <div className="nav-credit-item">
             <div className="nav-credit-dot" style={{ background: "#0284c7" }} />
-            <span className="nav-credit-brand">Tavily</span> for Market Research
+            <span className="nav-credit-brand">Tavily:</span> Market Research
           </div>
           <div className="nav-credit-item">
             <div className="nav-credit-dot" style={{ background: "#1a73e8" }} />
-            <span className="nav-credit-brand">Google DeepMind</span> for LLM
-            models
+            <span className="nav-credit-brand">Google DeepMind:</span> LLMs
           </div>
         </div>
       </nav>
@@ -1001,36 +1000,39 @@ export default function App() {
                         gap: 10,
                       }}
                     >
-                      <div>
-                        <div style={{ fontWeight: 600, fontSize: "0.84rem" }}>
-                          Simulate Customer Interviews
-                        </div>
-                        <div
-                          style={{
-                            fontSize: "0.78rem",
-                            color: "var(--text-muted)",
-                            marginTop: 3,
-                          }}
-                        >
-                          Run 5 synthetic user interviews based on your full
-                          research dossier
-                        </div>
-                      </div>
-                      <button
-                        className="btn-primary"
-                        onClick={startInterviews}
-                        disabled={isSimulating || !results["refine"]}
-                      >
-                        {isSimulating ? (
-                          <div
-                            className="spinner"
-                            style={{ width: 14, height: 14 }}
-                          />
-                        ) : (
-                          <Users size={14} />
-                        )}
-                        {isSimulating ? "Generating…" : "Start Interviews"}
-                      </button>
+                      {(() => {
+                        const missing = [
+                          !results['refine']      && 'Idea Refinement',
+                          !results['market']      && 'Market Research',
+                          !results['competitors'] && 'Competitor Analysis',
+                        ].filter(Boolean) as string[];
+                        const canStart = missing.length === 0 && !isSimulating;
+                        return (
+                          <>
+                            <div>
+                              <div style={{ fontWeight: 600, fontSize: '0.84rem' }}>Simulate Customer Interviews</div>
+                              <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: 3 }}>
+                                Run {TOTAL_INTERVIEWS} synthetic user interviews based on your full research dossier
+                              </div>
+                              {missing.length > 0 && !isSimulating && (
+                                <div style={{ fontSize: '0.73rem', color: 'var(--warning)', marginTop: 6, fontWeight: 600 }}>
+                                  Waiting for: {missing.join(', ')}
+                                </div>
+                              )}
+                            </div>
+                            <button
+                              className="btn-primary"
+                              onClick={startInterviews}
+                              disabled={!canStart}
+                            >
+                              {isSimulating
+                                ? <div className="spinner" style={{ width: 14, height: 14 }} />
+                                : <Users size={14} />}
+                              {isSimulating ? 'Generating…' : 'Start Interviews'}
+                            </button>
+                          </>
+                        );
+                      })()}
                     </div>
                   ) : (
                     <div
@@ -1074,11 +1076,9 @@ export default function App() {
                           </div>
                         </div>
                       ))}
-                      {/* Skeleton placeholders up to 5 while streaming */}
-                      {isSimulating &&
-                        Array.from({
-                          length: Math.max(0, 5 - interviews.length),
-                        }).map((_, i) => (
+                      {/* Single skeleton while next interview is expected */}
+                      {isSimulating && (interviews.length === 0 || interviews[interviews.length - 1]?.is_complete) && interviews.length < 5 &&
+                        [0].map((_, i) => (
                           <div
                             key={`sk-${i}`}
                             className="meeting-card"
@@ -1581,29 +1581,17 @@ export default function App() {
                     )}
                   </button>
                 ))}
-                {/* Skeleton placeholders for interviews not yet streamed */}
-                {isSimulating &&
-                  Array.from({
-                    length: TOTAL_INTERVIEWS - interviews.length,
-                  }).map((_, i) => (
-                    <div
-                      key={`skeleton-${i}`}
-                      className="interview-row interview-skeleton"
-                    >
-                      <div className="interview-avatar skeleton-avatar" />
-                      <div style={{ minWidth: 0, flex: 1 }}>
-                        <div
-                          className="skeleton-line"
-                          style={{ width: "70%", height: 11, marginBottom: 5 }}
-                        />
-                        <div
-                          className="skeleton-line"
-                          style={{ width: "50%", height: 9 }}
-                        />
-                      </div>
-                      <div className="skeleton-dot" />
+                {/* Single skeleton at the end while more interviews are expected */}
+                {isSimulating && (interviews.length === 0 || interviews[interviews.length - 1]?.is_complete) && (
+                  <div className="interview-row interview-skeleton">
+                    <div className="interview-avatar skeleton-avatar" />
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <div className="skeleton-line" style={{ width: "70%", height: 11, marginBottom: 5 }} />
+                      <div className="skeleton-line" style={{ width: "50%", height: 9 }} />
                     </div>
-                  ))}
+                    <div className="skeleton-dot" />
+                  </div>
+                )}
               </div>
 
               <div className="interview-detail">

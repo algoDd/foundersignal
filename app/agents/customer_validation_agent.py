@@ -192,6 +192,9 @@ Product Dossier:
 Return ONLY a valid JSON array of 7 strings, each being a short archetype name (2-4 words).
 Example: ["Early Adopter", "Skeptical Enterprise Buyer", "Budget-Conscious SMB Owner", "Technical Power User", "Compliance-Driven Manager", "First-Time User", "Industry Veteran"]
 """
+        TARGET_COUNT = 7
+        FALLBACK_ARCHETYPES = ["Early Adopter", "Skeptical Stakeholder", "Industry Veteran", "Cost-Conscious User", "Practical Implementer", "Visionary Innovator", "Risk-Averse Buyer"]
+
         archetype_res, _ = await self._llm.generate(archetype_prompt, temperature=0.7)
         try:
             clean = archetype_res.strip()
@@ -202,8 +205,18 @@ Example: ["Early Adopter", "Skeptical Enterprise Buyer", "Budget-Conscious SMB O
             archetypes = json.loads(clean)
             if not isinstance(archetypes, list) or len(archetypes) == 0:
                 raise ValueError("Invalid archetype list")
+            # Pad with fallback archetypes if LLM returned fewer than TARGET_COUNT
+            if len(archetypes) < TARGET_COUNT:
+                existing = set(a.lower() for a in archetypes)
+                for fb in FALLBACK_ARCHETYPES:
+                    if len(archetypes) >= TARGET_COUNT:
+                        break
+                    if fb.lower() not in existing:
+                        archetypes.append(fb)
+            # Trim to exactly TARGET_COUNT
+            archetypes = archetypes[:TARGET_COUNT]
         except Exception:
-            archetypes = ["Early Adopter", "Skeptical Stakeholder", "Industry Veteran", "Cost-Conscious User", "Practical Implementer", "Visionary Innovator", "Risk-Averse Buyer"]
+            archetypes = FALLBACK_ARCHETYPES
         
         interview_responses: list[str] = []
 
@@ -251,14 +264,23 @@ Example: ["Early Adopter", "Skeptical Enterprise Buyer", "Budget-Conscious SMB O
 
             # 3. Conduct the interview
             system = (
-                f"Identity: {user.bio()}\n"
-                "You are participating in a deep-dive interview about a new product idea and its technical/market research. "
-                "You have been shown the vision, the market data, and even the proposed UX/UI prototypes. "
-                "Be authentic to your persona. If you are a skeptic, challenge the assumptions in the research. "
-                "If you are an industry veteran, comment on the market fit and competitor gaps. "
-                "Keep your response visceral and honest. 2-3 short, impactful paragraphs."
+                f"You are {ctx_data.get('name', user.name)}, {ctx_data.get('role', '')}. {ctx_data.get('background', '')}\n\n"
+                "You have just been shown a new product feature as part of an A/B test. "
+                "Respond purely as a real user who has been using this feature or a prototype of it. "
+                "Ground your response entirely in YOUR personal experience: "
+                "what you noticed, what felt intuitive or confusing, whether it solved a problem you actually have, "
+                "and whether you would keep using it or go back to the old way. "
+                "Do NOT give strategic advice or ask what the product team plans to do. "
+                "Do NOT speak as an analyst, consultant, or investor. "
+                "Speak like a real person reacting to something they just tried — honest, personal, specific. "
+                "Reference your own habits, past frustrations, or similar products you've used. "
+                "2-3 conversational paragraphs."
             )
-            msg = f"Give me your honest, visceral reaction to this entire product dossier: {full_research_dossier[:5000]}"
+            msg = (
+                f"You were part of an A/B test and just tried this new feature:\n\n{full_research_dossier[:3000]}\n\n"
+                "How did it feel to use it? Did it solve a problem you actually have? "
+                "Would you use it again, or would you go back to how you did things before?"
+            )
             
             # Use our centralized LLM provider for streaming the response
             full_response = ""
@@ -285,23 +307,23 @@ Example: ["Early Adopter", "Skeptical Enterprise Buyer", "Budget-Conscious SMB O
         # 4. Generate synthesis report from all interview responses
         combined_responses = "\n\n---\n\n".join(interview_responses)
         report_prompt = f"""
-You are a senior market research analyst. You have just completed {len(archetypes)} in-depth customer interviews for the following product:
+You are a senior UX researcher analysing A/B test feedback. You have just completed {len(archetypes)} user interviews for the following product feature:
 
 {full_research_dossier[:2000]}
 
-Here are the interview transcripts:
+Here are the user interview transcripts:
 
 {combined_responses[:6000]}
 
 Write a comprehensive synthesis report in Markdown covering:
-1. **Overall Market Signal** — a 0–100 score with a one-line verdict
-2. **Key Themes** — the 3–5 most recurring ideas across interviews
-3. **Critical Objections** — deal-breakers or concerns raised by multiple interviewees
-4. **Surprising Insights** — unexpected findings or edge cases worth exploring
-5. **Archetype Breakdown** — brief summary of each archetype's stance (positive / neutral / negative)
-6. **Recommended Next Steps** — concrete actions the founder should take
+1. **Feature Signal Score** — a 0–100 score reflecting overall user willingness to adopt this feature, with a one-line verdict
+2. **What Users Loved** — specific moments or aspects users responded positively to, with quotes
+3. **What Users Struggled With** — friction points, confusion, or things that felt unnecessary
+4. **Behavioural Patterns** — recurring habits or preferences across user types that shaped their reaction
+5. **User Segment Breakdown** — how each archetype responded (would adopt / neutral / would not adopt)
+6. **Recommended Iterations** — concrete, user-grounded changes to improve adoption based on the feedback
 
-Be direct, opinionated, and data-driven. Back every claim with evidence from the transcripts.
+Be direct and evidence-based. Ground every finding in what users actually said about their experience.
 """
         report_text = ""
         async for chunk, _ in self._llm.stream(report_prompt):
