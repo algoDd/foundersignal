@@ -11,7 +11,6 @@ import {
   Layers,
   Globe,
   Search,
-  ArrowRight,
   Clock,
   BarChart2,
   Users,
@@ -27,8 +26,13 @@ import {
   Sun,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
+import { AuthScreen } from "./components/AuthScreen";
+import { HomeScreen } from "./components/HomeScreen";
+import { IdeaPromptBar } from "./components/IdeaPromptBar";
+import { useTypewriterPlaceholder } from "./hooks/useTypewriterPlaceholder";
 
 const TOTAL_INTERVIEWS = 7; // minimum interviews shown; update to match backend archetype count
+const API_BASE = "http://localhost:8000/api/v1";
 
 const AGENTS = [
   {
@@ -127,106 +131,6 @@ function useTTS() {
   return { state, play, stop };
 }
 
-// ── Typewriter placeholder ─────────────────────────────────────────────────
-const PLACEHOLDERS = [
-  "Describe your startup idea…",
-  "What is your next feature?",
-  "What would you like to A/B test?",
-  "What problem are you solving?",
-  "What's your go-to-market hypothesis?",
-];
-
-function useTypewriterPlaceholder() {
-  const [displayed, setDisplayed] = useState('');
-  const [phraseIdx, setPhraseIdx] = useState(0);
-  const [typing, setTyping] = useState(true);
-  const [paused, setPaused] = useState(false);
-
-  useEffect(() => {
-    const phrase = PLACEHOLDERS[phraseIdx];
-
-    if (paused) {
-      const id = setTimeout(() => { setPaused(false); setTyping(false); }, 1600);
-      return () => clearTimeout(id);
-    }
-
-    if (typing) {
-      if (displayed.length < phrase.length) {
-        const id = setTimeout(() => setDisplayed(phrase.slice(0, displayed.length + 1)), 55);
-        return () => clearTimeout(id);
-      } else {
-        setPaused(true);
-      }
-    } else {
-      if (displayed.length > 0) {
-        const id = setTimeout(() => setDisplayed(d => d.slice(0, -1)), 30);
-        return () => clearTimeout(id);
-      } else {
-        setPhraseIdx(i => (i + 1) % PLACEHOLDERS.length);
-        setTyping(true);
-      }
-    }
-  }, [displayed, typing, paused, phraseIdx]);
-
-  return displayed;
-}
-
-// ── Idea prompt bar ────────────────────────────────────────────────────────
-function IdeaPromptBar({
-  idea,
-  isOrchestrating,
-  onIdeaChange,
-  onRerun,
-}: {
-  idea: string;
-  isOrchestrating: boolean;
-  onIdeaChange: (v: string) => void;
-  onRerun: () => void;
-}) {
-  const [committed, setCommitted] = useState(idea);
-  const [focused, setFocused] = useState(false);
-  const changed = idea !== committed;
-  const handleRerun = () => {
-    setCommitted(idea);
-    onRerun();
-  };
-  return (
-    <div
-      className={`idea-bar${focused ? " focused" : ""}${changed ? " changed" : ""}`}
-    >
-      <div style={{ flex: 1 }}>
-        <div className="idea-bar-label">Your Idea</div>
-        <textarea
-          value={idea}
-          onChange={(e) => onIdeaChange(e.target.value)}
-          onFocus={() => setFocused(true)}
-          onBlur={() => setFocused(false)}
-          rows={2}
-          className="idea-bar-textarea"
-        />
-      </div>
-      <button
-        className="btn-primary"
-        onClick={handleRerun}
-        disabled={isOrchestrating || !idea.trim() || !changed}
-        style={{
-          opacity: !changed ? 0.35 : 1,
-          transition: "opacity 0.2s",
-          flexShrink: 0,
-          alignSelf: "center",
-        }}
-      >
-        {isOrchestrating ? (
-          <div className="spinner" style={{ width: 16, height: 16 }} />
-        ) : (
-          <ArrowRight size={15} />
-        )}
-        {isOrchestrating ? "Running…" : "Modify"}
-      </button>
-    </div>
-  );
-}
-
 // ── Donut chart ────────────────────────────────────────────────────────────
 function DonutChart({
   value,
@@ -273,6 +177,25 @@ function DonutChart({
   );
 }
 
+function extractBulletLines(markdown: string, limit = 4) {
+  return markdown
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith("- ") || line.startsWith("* "))
+    .map((line) => line.slice(2).trim())
+    .filter(Boolean)
+    .slice(0, limit);
+}
+
+function extractParagraphs(markdown: string, limit = 2) {
+  return markdown
+    .split("\n\n")
+    .map((chunk) => chunk.replace(/^#+\s+/gm, "").trim())
+    .filter(Boolean)
+    .filter((chunk) => !chunk.startsWith("- ") && !chunk.startsWith("* "))
+    .slice(0, limit);
+}
+
 // ── Main App ───────────────────────────────────────────────────────────────
 export default function App() {
   const [idea, setIdea] = useState("");
@@ -283,6 +206,7 @@ export default function App() {
   const [tokens, setTokens] = useState<Record<string, number>>({});
   const [searches, setSearches] = useState<Record<string, any[]>>({});
   const [activeTab, setActiveTab] = useState("overview");
+  const [contentMode, setContentMode] = useState<"dashboard" | "reading">("dashboard");
   const [darkMode, setDarkMode] = useState(
     () => window.matchMedia("(prefers-color-scheme: dark)").matches,
   );
@@ -304,6 +228,19 @@ export default function App() {
     "pipeline",
   );
   const [searchQuery, setSearchQuery] = useState("");
+  const [authMode, setAuthMode] = useState<"sign-in" | "sign-up">("sign-in");
+  const [authEmail, setAuthEmail] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
+  const [authLoading, setAuthLoading] = useState(false);
+  const [authToken, setAuthToken] = useState<string | null>(
+    () => localStorage.getItem("fs_auth_token"),
+  );
+  const [authUser, setAuthUser] = useState<{ email: string; uid: string } | null>(
+    () => {
+      const raw = localStorage.getItem("fs_auth_user");
+      return raw ? JSON.parse(raw) : null;
+    },
+  );
   const tts = useTTS();
 
   const totalTokens = Object.values(tokens).reduce((a, v) => a + v, 0);
@@ -312,6 +249,12 @@ export default function App() {
     0,
   );
   const hasResults = Object.keys(results).length > 0;
+  const activeMarkdown = results[activeTab] || "";
+  const activeBullets = extractBulletLines(activeMarkdown, 4);
+  const activeParagraphs = extractParagraphs(activeMarkdown, 2);
+  const activeAgent = AGENTS.find((a) => a.id === activeTab);
+  const activeSearches = searches[activeTab]?.length || 0;
+  const activeTokens = tokens[activeTab] || 0;
 
   useEffect(() => {
     document.documentElement.setAttribute(
@@ -321,22 +264,74 @@ export default function App() {
   }, [darkMode]);
 
   useEffect(() => {
+    if (activeTab !== "overview" && activeTab !== "interviews") {
+      setContentMode("dashboard");
+    }
+  }, [activeTab]);
+
+  useEffect(() => {
     fetchSessions();
-  }, []);
+  }, [authToken]);
+
+  useEffect(() => {
+    const bootstrapAuth = async () => {
+      if (!authToken) return;
+      try {
+        const res = await fetch(`${API_BASE}/auth/me`, {
+          headers: { Authorization: `Bearer ${authToken}` },
+        });
+        if (!res.ok) throw new Error("Auth expired");
+        const user = await res.json();
+        setAuthUser(user);
+        localStorage.setItem("fs_auth_user", JSON.stringify(user));
+      } catch {
+        localStorage.removeItem("fs_auth_token");
+        localStorage.removeItem("fs_auth_user");
+        setAuthToken(null);
+        setAuthUser(null);
+      }
+    };
+    bootstrapAuth();
+  }, [authToken]);
+
+  useEffect(() => {
+    if (!authToken) return;
+    if (!idea.trim() && Object.keys(results).length === 0 && interviews.length === 0) return;
+
+    const timer = window.setTimeout(() => {
+      void saveCurrentSession(results, status, tokens, searches, interviews, interviewReport);
+    }, 1200);
+
+    return () => window.clearTimeout(timer);
+  }, [authToken, idea, results, status, tokens, searches, interviews, interviewReport]);
+
+  const getHeaders = (includeJson = false) => {
+    const headers: Record<string, string> = {};
+    if (includeJson) headers["Content-Type"] = "application/json";
+    if (authToken) headers.Authorization = `Bearer ${authToken}`;
+    return headers;
+  };
 
   // ── Data fetchers ────────────────────────────────────────────────────────
   const fetchSessions = async () => {
+    if (!authToken) {
+      setSessions([]);
+      return;
+    }
     try {
-      const r = await fetch("http://localhost:8000/api/v1/agents/sessions");
+      const r = await fetch(`${API_BASE}/agents/sessions`, {
+        headers: getHeaders(),
+      });
+      if (!r.ok) throw new Error("Failed to load sessions");
       setSessions(await r.json());
     } catch {}
   };
 
   const loadSession = async (sessionId: string) => {
     try {
-      const r = await fetch(
-        `http://localhost:8000/api/v1/agents/sessions/${sessionId}`,
-      );
+      const r = await fetch(`${API_BASE}/agents/sessions/${sessionId}`, {
+        headers: getHeaders(),
+      });
       const d = await r.json();
       setIdea(d.input.idea);
       setCurrentSessionId(d.report_id);
@@ -344,16 +339,27 @@ export default function App() {
       setStatus(d.status_map || {});
       setTokens(d.tokens_map || {});
       setSearches(d.searches_map || {});
+      setInterviews(d.interviews || []);
+      setInterviewReport(d.interview_report || "");
+      setSelectedInterviewIndex((d.interviews || []).length ? 0 : null);
       setActiveTab("overview");
     } catch {}
   };
 
-  const saveCurrentSession = async (r: any, s: any, t: any, se: any) => {
+  const saveCurrentSession = async (
+    r: any,
+    s: any,
+    t: any,
+    se: any,
+    interviewItems: any[] = interviews,
+    reportText: string = interviewReport,
+  ) => {
+    if (!authToken) return;
     try {
       const id = currentSessionId || Math.random().toString(36).slice(7);
-      await fetch("http://localhost:8000/api/v1/agents/sessions/save", {
+      await fetch(`${API_BASE}/agents/sessions/save`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: getHeaders(true),
         body: JSON.stringify({
           report_id: id,
           input: { idea },
@@ -361,12 +367,55 @@ export default function App() {
           status_map: s,
           tokens_map: t,
           searches_map: se,
+          interviews: interviewItems,
+          interview_report: reportText,
           created_at: new Date().toISOString(),
         }),
       });
       setCurrentSessionId(id);
       fetchSessions();
     } catch {}
+  };
+
+  const submitAuth = async () => {
+    if (!authEmail.trim() || !authPassword.trim()) return;
+    setAuthLoading(true);
+    setGlobalError(null);
+    try {
+      const res = await fetch(`${API_BASE}/auth/${authMode}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: authEmail.trim(),
+          password: authPassword,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.detail || "Authentication failed");
+      }
+      localStorage.setItem("fs_auth_token", data.id_token);
+      localStorage.setItem(
+        "fs_auth_user",
+        JSON.stringify({ uid: data.local_id, email: data.email }),
+      );
+      setAuthToken(data.id_token);
+      setAuthUser({ uid: data.local_id, email: data.email });
+      setAuthPassword("");
+    } catch (e: any) {
+      setGlobalError(e.message || "Authentication failed.");
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const signOut = () => {
+    localStorage.removeItem("fs_auth_token");
+    localStorage.removeItem("fs_auth_user");
+    setAuthToken(null);
+    setAuthUser(null);
+    setSessions([]);
+    setCurrentSessionId(null);
   };
 
   // ── Streaming ────────────────────────────────────────────────────────────
@@ -559,33 +608,35 @@ export default function App() {
   // ── Landing ──────────────────────────────────────────────────────────────
   const placeholder = useTypewriterPlaceholder();
 
+  if (!authUser) {
+    return (
+      <AuthScreen
+        authEmail={authEmail}
+        authLoading={authLoading}
+        authMode={authMode}
+        authPassword={authPassword}
+        error={globalError}
+        onEmailChange={setAuthEmail}
+        onModeChange={setAuthMode}
+        onPasswordChange={setAuthPassword}
+        onSubmit={submitAuth}
+      />
+    );
+  }
+
   if (!hasResults && !isOrchestrating) {
     return (
-      <div className="landing">
-        <div className="landing-card">
-          <div className="landing-icon">
-            <Zap size={26} />
-          </div>
-          <h1 className="landing-title">FounderSignal</h1>
-          <p className="landing-sub">
-            Get market signals even before hitting the market.
-          </p>
-          <textarea
-            value={idea}
-            onChange={(e) => setIdea(e.target.value)}
-            placeholder={placeholder}
-            rows={4}
-            className="landing-textarea"
-          />
-          <button
-            className="btn-primary btn-full"
-            onClick={startAnalysis}
-            disabled={!idea.trim()}
-          >
-            <TrendingUp size={18} /> Get Signals
-          </button>
-        </div>
-      </div>
+      <HomeScreen
+        idea={idea}
+        isOrchestrating={isOrchestrating}
+        placeholder={placeholder}
+        sessions={sessions}
+        userEmail={authUser.email}
+        onIdeaChange={setIdea}
+        onLoadSession={loadSession}
+        onSignOut={signOut}
+        onStartAnalysis={startAnalysis}
+      />
     );
   }
 
@@ -835,10 +886,13 @@ export default function App() {
             <div className="topbar-avatar">
               <div className="topbar-avatar-img">F</div>
               <div>
-                <div className="topbar-avatar-name">Founder</div>
-                <div className="topbar-avatar-role">Analyst</div>
+                <div className="topbar-avatar-name">{authUser.email.split("@")[0]}</div>
+                <div className="topbar-avatar-role">Signed in</div>
               </div>
             </div>
+            <button className="btn-ghost" onClick={signOut}>
+              Sign Out
+            </button>
           </div>
         </div>
 
@@ -1508,36 +1562,126 @@ export default function App() {
               <div
                 style={{
                   display: "flex",
-                  justifyContent: "flex-end",
+                  justifyContent: "space-between",
+                  alignItems: "center",
                   marginBottom: 16,
                 }}
               >
-                <button
-                  className="btn-ghost"
-                  style={{ gap: 6 }}
-                  disabled={!results[activeTab]}
-                  title="Download as Markdown"
-                  onClick={() => {
-                    const label =
-                      AGENTS.find((a) => a.id === activeTab)?.label ||
-                      activeTab;
-                    const blob = new Blob([results[activeTab]], {
-                      type: "text/markdown",
-                    });
-                    const url = URL.createObjectURL(blob);
-                    const a = document.createElement("a");
-                    a.href = url;
-                    a.download = `${label.toLowerCase().replace(/\s+/g, "-")}.md`;
-                    a.click();
-                    URL.revokeObjectURL(url);
-                  }}
-                >
-                  <Download size={13} /> Download
-                </button>
+                <div>
+                  <div className="card-title" style={{ marginBottom: 4 }}>
+                    {activeAgent?.label || activeTab}
+                  </div>
+                  <div style={{ fontSize: "0.8rem", color: "var(--text-secondary)" }}>
+                    Switch between a fast dashboard summary and the full written output.
+                  </div>
+                </div>
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <div style={{ display: "flex", gap: 4 }}>
+                    <button
+                      className="btn-ghost"
+                      onClick={() => setContentMode("dashboard")}
+                      style={{
+                        background: contentMode === "dashboard" ? "var(--primary-light)" : undefined,
+                        borderColor: contentMode === "dashboard" ? "var(--primary-border)" : undefined,
+                      }}
+                    >
+                      Dashboard
+                    </button>
+                    <button
+                      className="btn-ghost"
+                      onClick={() => setContentMode("reading")}
+                      style={{
+                        background: contentMode === "reading" ? "var(--primary-light)" : undefined,
+                        borderColor: contentMode === "reading" ? "var(--primary-border)" : undefined,
+                      }}
+                    >
+                      Reading
+                    </button>
+                  </div>
+                  <button
+                    className="btn-ghost"
+                    style={{ gap: 6 }}
+                    disabled={!results[activeTab]}
+                    title="Download as Markdown"
+                    onClick={() => {
+                      const label = activeAgent?.label || activeTab;
+                      const blob = new Blob([results[activeTab]], {
+                        type: "text/markdown",
+                      });
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement("a");
+                      a.href = url;
+                      a.download = `${label.toLowerCase().replace(/\s+/g, "-")}.md`;
+                      a.click();
+                      URL.revokeObjectURL(url);
+                    }}
+                  >
+                    <Download size={13} /> Download
+                  </button>
+                </div>
               </div>
-              <div className="markdown-content">
-                <ReactMarkdown>{results[activeTab] || ""}</ReactMarkdown>
-              </div>
+              {contentMode === "dashboard" ? (
+                <div style={{ display: "grid", gridTemplateColumns: "260px 1fr", gap: 18 }}>
+                  <div className="card" style={{ gap: 16 }}>
+                    <DonutChart value={activeTokens} max={Math.max(activeTokens, 1000)} label="tokens" />
+                    <DonutChart value={activeSearches} max={Math.max(activeSearches, 4)} label="searches" />
+                    <div className="stat-panel">
+                      <div className="stat-panel-label">Status</div>
+                      <div className="stat-panel-value" style={{ fontSize: "1.1rem" }}>
+                        {status[activeTab] || "pending"}
+                      </div>
+                    </div>
+                  </div>
+                  <div style={{ display: "grid", gap: 18 }}>
+                    <div className="card">
+                      <div className="card-header">
+                        <div className="card-title">What matters most</div>
+                      </div>
+                      <div style={{ display: "grid", gap: 10 }}>
+                        {(activeBullets.length ? activeBullets : ["No summary bullets yet."]).map((item) => (
+                          <div key={item} className="alert-item">
+                            <div className="alert-dot info" />
+                            <div className="alert-text">{item}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18 }}>
+                      <div className="card">
+                        <div className="card-header">
+                          <div className="card-title">Executive takeaway</div>
+                        </div>
+                        <div className="markdown-content">
+                          <ReactMarkdown>{activeParagraphs[0] || "No executive summary available yet."}</ReactMarkdown>
+                        </div>
+                      </div>
+                      <div className="card">
+                        <div className="card-header">
+                          <div className="card-title">Research activity</div>
+                        </div>
+                        <div style={{ display: "grid", gap: 10 }}>
+                          {(searches[activeTab] || []).slice(0, 4).map((entry: any) => (
+                            <div key={`${entry.query}-${entry.timestamp || ""}`} className="template-card" style={{ cursor: "default" }}>
+                              <div className="template-tag">Search</div>
+                              <div className="template-name" style={{ fontSize: "0.8rem" }}>{entry.query}</div>
+                              <div className="template-desc">{entry.results_count || 0} results</div>
+                            </div>
+                          ))}
+                          {activeSearches === 0 && (
+                            <div style={{ color: "var(--text-muted)", fontSize: "0.82rem" }}>
+                              No web searches were needed for this step.
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="markdown-content">
+                  <ReactMarkdown>{results[activeTab] || ""}</ReactMarkdown>
+                </div>
+              )}
             </div>
           )}
 

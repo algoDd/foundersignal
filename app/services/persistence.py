@@ -71,7 +71,7 @@ class SessionManager:
             logger.error("Failed to fetch sessions from Firestore: %s", e)
             return []
 
-    async def get_session_by_id(self, report_id: str) -> Optional[Dict[str, Any]]:
+    async def get_session_by_id(self, user_uid: str, report_id: str) -> Optional[Dict[str, Any]]:
         """Get a single session by its ID."""
         coll = self._get_collection()
         if not coll:
@@ -79,10 +79,12 @@ class SessionManager:
             return report if report else None
 
         try:
-
             doc = coll.document(report_id).get()
             if doc.exists:
-                return doc.to_dict()
+                data = doc.to_dict()
+                if data.get("user_uid") != user_uid:
+                    return None
+                return data
             return None
         except Exception as e:
             logger.error("Failed to fetch session %s: %s", report_id, e)

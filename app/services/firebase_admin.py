@@ -57,15 +57,27 @@ def get_db():
         return None
 
 
-security = HTTPBearer()
+security = HTTPBearer(auto_error=False)
 
 async def get_current_user(token: HTTPAuthorizationCredentials = Depends(security)):
     """Dependency to verify Firebase ID token and return user data."""
+    if token is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
     app = init_firebase()
     if not app:
-        # bypass for dev if Firebase is not initialized (e.g. missing ADC)
-        logger.warning("Bypassing Auth: Firebase Admin not initialized. Using dev user.")
-        return {"uid": "dev_user_123", "email": "dev@foundersignal.com"}
+        settings = get_settings()
+        if settings.allow_dev_auth_bypass and settings.debug:
+            logger.warning("Bypassing Auth in debug mode: Firebase Admin not initialized.")
+            return {"uid": "dev_user_123", "email": "dev@foundersignal.com"}
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Authentication service is not configured",
+        )
 
     try:
         decoded_token = auth.verify_id_token(token.credentials)
@@ -78,4 +90,3 @@ async def get_current_user(token: HTTPAuthorizationCredentials = Depends(securit
             detail="Invalid authentication credentials",
             headers={"WWW-Authenticate": "Bearer"},
         )
-

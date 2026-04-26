@@ -57,6 +57,7 @@ class Settings(BaseSettings):
     firebase_storage_bucket: str = ""
     firebase_messaging_sender_id: str = ""
     firebase_app_id: str = ""
+    allow_dev_auth_bypass: bool = False
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
 
 

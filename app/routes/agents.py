@@ -4,7 +4,7 @@ import json
 import logging
 import re
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from app.agents.ai_visibility import AIVisibilityAgent
@@ -17,6 +17,7 @@ from app.agents.ux_flow import UXFlowAgent
 from app.agents.validation_scoring import ValidationScoringAgent
 from app.models.schemas import IdeaInput
 from app.services.hera_service import get_hera_service
+from app.services.firebase_admin import get_current_user
 from app.services.peec_service import get_peec_service
 from app.services.tavily_service import get_tavily_service
 from app.services.persistence import persistence
@@ -382,17 +383,17 @@ async def customer_interview_follow_up(request: Request):
 
 
 @router.get("/sessions")
-async def list_sessions():
+async def list_sessions(user: dict = Depends(get_current_user)):
     """List all saved sessions."""
-    return await persistence.get_sessions("public")
+    return await persistence.get_sessions(user["uid"])
 
 
 
 
 @router.get("/sessions/{session_id}")
-async def load_session(session_id: str):
+async def load_session(session_id: str, user: dict = Depends(get_current_user)):
     """Load a specific session."""
-    session = await persistence.get_session_by_id(session_id)
+    session = await persistence.get_session_by_id(user["uid"], session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
         
@@ -402,17 +403,17 @@ async def load_session(session_id: str):
 
 
 @router.post("/sessions/save")
-async def save_session(request: Request):
+async def save_session(request: Request, user: dict = Depends(get_current_user)):
     """Save or update a session."""
     data = await request.json()
-    report_id = await persistence.save_session("public", data)
+    report_id = await persistence.save_session(user["uid"], data)
     return {"success": True, "id": report_id}
 
 
 
 
 @router.delete("/sessions/{session_id}")
-async def delete_session(session_id: str):
+async def delete_session(session_id: str, user: dict = Depends(get_current_user)):
     """Delete a session."""
-    success = await persistence.delete_session("public", session_id)
+    success = await persistence.delete_session(user["uid"], session_id)
     return {"success": success}
